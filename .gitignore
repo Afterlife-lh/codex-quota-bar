@@ -1,0 +1,16 @@
+/node_modules
+/dist
+/src-tauri/target
+/src-tauri/gen
+/.idea
+/.vscode
+*.log
+.env
+.env.*
+!.env.example
+auth.json
+settings.json
+*.msi
+*.exe
+Thumbs.db
+.DS_Store

@@ -1,0 +1,98 @@
+:root {
+  font-family: "Segoe UI Variable Text", "Segoe UI", sans-serif;
+  font-synthesis: none;
+  color: #17191d;
+  background: transparent;
+  --panel: rgba(248, 249, 251, 0.97);
+  --panel-solid: #f8f9fb;
+  --border: rgba(20, 24, 31, 0.12);
+  --muted: #646b75;
+  --hover: rgba(0, 0, 0, 0.055);
+}
+@media (prefers-color-scheme: dark) {
+  :root { color: #f3f5f8; --panel: rgba(28, 30, 35, 0.97); --panel-solid: #1c1e23; --border: rgba(255,255,255,.11); --muted: #a8afb9; --hover: rgba(255,255,255,.075); }
+}
+* { box-sizing: border-box; }
+html, body, #root { margin: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; }
+button, input { font: inherit; }
+button { color: inherit; }
+.taskbar-widget { width: 100%; height: 100%; display: flex; align-items: center; gap: 9px; padding: 3px 10px; border-radius: 7px; cursor: default; user-select: none; transition: background 120ms ease; }
+.taskbar-widget:hover { background: var(--hover); }
+.taskbar-widget:active { background: color-mix(in srgb, var(--hover) 170%, transparent); }
+.taskbar-widget.is-reversed { flex-direction: row-reverse; }
+.dual-ring { flex: 0 0 auto; overflow: visible; filter: drop-shadow(0 1px 1px rgba(0,0,0,.18)); }
+.ring-track { fill: none; stroke: currentColor; opacity: .15; }
+.ring-value { vector-effect: non-scaling-stroke; }
+.ring-value.animated { transition: stroke-dashoffset 180ms ease-out, stroke 180ms ease-out; }
+.quota-rows { min-width: 0; overflow: hidden; display: flex; flex: 1; flex-direction: column; justify-content: center; gap: 1px; font-size: calc(11px * var(--font-scale, 1)); line-height: calc(15px * var(--font-scale, 1)); font-variant-numeric: tabular-nums; }
+.quota-row { min-width: 0; display: flex; align-items: center; white-space: nowrap; }
+.quota-main { flex: 0 1 56px; }
+.separator { flex: 0 0 7px; }
+.countdown { min-width: 32px; flex: 1 1 42px; }
+.taskbar-widget.is-reversed .quota-row { flex-direction: row-reverse; }
+.taskbar-widget.is-reversed .countdown { text-align: left; }
+.quota-main { min-width: 0; display: flex; justify-content: space-between; align-items: baseline; font-weight: 650; letter-spacing: .1px; }
+.quota-main strong { font-size: calc(11.5px * var(--font-scale, 1)); }
+.separator { text-align: center; color: color-mix(in srgb, currentColor 62%, transparent); }
+.countdown { color: color-mix(in srgb, currentColor 80%, transparent); text-align: right; }
+.empty-state { color: color-mix(in srgb, currentColor 72%, transparent); font-size: calc(12px * var(--font-scale, 1)); }
+.stale-dot { position: absolute; right: 4px; top: 5px; width: 5px; height: 5px; border-radius: 50%; background: #f3ad32; box-shadow: 0 0 4px rgba(243,173,50,.75); }
+.panel { width: 100%; height: 100%; border: 1px solid var(--border); background: var(--panel); backdrop-filter: blur(28px) saturate(1.35); box-shadow: 0 16px 48px rgba(0,0,0,.28); }
+.detail-panel { border-radius: 16px; padding: 0 16px 15px; }
+.settings-window { border-radius: 16px; padding: 0 18px 16px; }
+.window-header { height: 48px; margin: 0 -5px; display: flex; align-items: center; justify-content: space-between; }
+.window-header > div { display: flex; align-items: center; gap: 9px; font-size: 13px; }
+.app-mark { width: 25px; height: 25px; border-radius: 8px; display: grid; place-items: center; font-size: 9px; font-weight: 800; color: #fff; background: linear-gradient(145deg, #38c878, #169a55); box-shadow: 0 4px 12px rgba(29,178,99,.3); }
+.icon-button { width: 30px; height: 30px; display: inline-grid; place-items: center; border: 0; border-radius: 8px; background: transparent; cursor: pointer; }
+.icon-button:hover { background: var(--hover); }
+.hero { display: flex; align-items: center; gap: 20px; padding: 12px 14px 18px; }
+.hero > div { display: flex; flex-direction: column; }
+.hero span { color: var(--muted); font-size: 12px; }
+.hero strong { font-size: 30px; line-height: 36px; letter-spacing: -.5px; }
+.hero small { color: var(--muted); font-size: 10px; }
+.quota-card { padding: 13px 14px; margin-bottom: 9px; border: 1px solid var(--border); border-radius: 12px; background: color-mix(in srgb, var(--panel-solid) 58%, transparent); }
+.card-top, .card-meta { display: flex; align-items: center; justify-content: space-between; }
+.card-top span { font-size: 12px; font-weight: 600; }
+.card-top strong { font-size: 19px; font-variant-numeric: tabular-nums; }
+.linear-track { height: 4px; margin: 9px 0 8px; overflow: hidden; border-radius: 9px; background: color-mix(in srgb, currentColor 10%, transparent); }
+.linear-track span { display: block; height: 100%; border-radius: inherit; transition: width 180ms ease; }
+.card-meta, .quota-card time { color: var(--muted); font-size: 10px; }
+.card-meta span { display: flex; align-items: center; gap: 4px; }
+.quota-card time { display: block; margin-top: 5px; }
+.error-banner { margin: -5px 0 9px; padding: 8px 10px; border-radius: 9px; color: #b34435; background: rgba(235,91,69,.11); font-size: 10px; }
+.detail-actions { display: flex; align-items: center; justify-content: space-between; min-height: 35px; color: var(--muted); font-size: 10px; }
+.detail-actions > div { display: flex; gap: 3px; }
+.spin { animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.settings-panel { display: flex; flex-direction: column; gap: 10px; height: calc(100% - 48px); padding-right: 4px; overflow-y: auto; scrollbar-width: thin; }
+.settings-loading { height: 340px; display: grid; place-items: center; color: var(--muted); font-size: 12px; }
+.settings-panel label { display: flex; flex-direction: column; gap: 6px; font-size: 11px; color: var(--muted); }
+.settings-panel label > span { display: flex; align-items: center; gap: 6px; }
+.settings-panel input[type="text"], .settings-panel input[type="number"], .settings-panel input:not([type]) { width: 100%; height: 31px; border: 1px solid var(--border); border-radius: 8px; padding: 0 9px; color: inherit; background: color-mix(in srgb, var(--panel-solid) 70%, transparent); outline: none; }
+.setting-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; }
+.setting-section-title { margin-top: 2px; color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase; }
+.setting-hint { margin-top: -3px; color: var(--muted); font-size: 10px; }
+.select-setting select { width: 100%; height: 31px; border: 1px solid var(--border); border-radius: 8px; padding: 0 8px; color: inherit; background: var(--panel-solid); outline: none; }
+.settings-preview { min-height: 58px; display: flex; align-items: center; justify-content: center; gap: 13px; border: 1px solid rgba(255,255,255,.08); border-radius: 11px; background: #202329; }
+.settings-preview.is-reversed { flex-direction: row-reverse; }
+.settings-preview > div { display: grid; grid-template-columns: 55px 65px; gap: 1px 7px; font-size: 10px; font-variant-numeric: tabular-nums; }
+.settings-preview span { font-weight: 700; }
+.settings-preview small { color: rgba(255,255,255,.72); }
+.range-setting span { display: flex !important; justify-content: space-between; }
+.range-setting output { color: inherit; font-variant-numeric: tabular-nums; }
+.range-setting input { width: 100%; accent-color: #2dbb70; }
+.settings-panel .toggle { flex-direction: row; justify-content: space-between; align-items: center; }
+.toggle input { accent-color: #2dbb70; }
+.primary-button { height: 34px; border: 0; border-radius: 9px; display: flex; align-items: center; justify-content: center; gap: 7px; color: white; background: #209d5c; cursor: pointer; }
+.primary-button:hover { background: #168c4f; }
+.context-menu { padding: 7px; border-radius: 11px; }
+.context-menu button { width: 100%; height: 34px; display: flex; align-items: center; gap: 10px; padding: 0 10px; border: 0; border-radius: 7px; background: transparent; font-size: 12px; cursor: pointer; }
+.context-menu button:hover { background: var(--hover); }
+.context-menu .danger { color: #db5148; }
+.menu-separator { height: 1px; margin: 4px 6px; background: var(--border); }
+@media (max-width: 175px) {
+  .taskbar-widget { gap: 5px; padding-inline: 6px; }
+  .separator { display: none; }
+  .quota-main { min-width: 44px; flex-basis: 52px; }
+  .countdown { max-width: 40px; }
+}
