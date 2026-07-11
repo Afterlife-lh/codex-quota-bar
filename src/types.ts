@@ -34,6 +34,7 @@ export interface AppSettings {
   windowAlignment: "left" | "right";
   reverseLayout: boolean;
   autoUpdate: boolean;
+  radarEnabled: boolean;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -52,6 +53,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   windowAlignment: "right",
   reverseLayout: false,
   autoUpdate: true,
+  radarEnabled: true,
 };
 
 export function normalizeSettings(value?: Partial<AppSettings> | null): AppSettings {

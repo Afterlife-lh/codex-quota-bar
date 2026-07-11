@@ -141,20 +141,40 @@ pub async fn download(release: &UpdateRelease) -> Result<PathBuf, String> {
 pub fn launch_installer(path: &std::path::Path) -> Result<(), String> {
     use std::os::windows::process::CommandExt;
     let current_exe = std::env::current_exe().map_err(|error| error.to_string())?;
-    let msi = path.to_string_lossy();
-    let executable = current_exe.to_string_lossy();
-    if msi.contains('"') || executable.contains('"') {
-        return Err("更新路径包含不支持的字符".into());
-    }
+    let msi = powershell_literal(&windows_command_path(path));
+    let executable = powershell_literal(&windows_command_path(&current_exe));
     let script = format!(
-        "timeout /t 2 /nobreak >nul & start /wait \"\" msiexec.exe /i \"{msi}\" /passive /norestart & del /q \"{msi}\" & start \"\" \"{executable}\""
+        "$msi='{msi}';$exe='{executable}';Start-Sleep -Seconds 2;& msiexec.exe /i $msi /passive /norestart;$code=$LASTEXITCODE;if($code -eq 0 -or $code -eq 3010){{Remove-Item -LiteralPath $msi -Force -ErrorAction SilentlyContinue}};Start-Process -FilePath $exe"
     );
-    Command::new("cmd.exe")
-        .args(["/D", "/S", "/C", &script])
+    Command::new("powershell.exe")
+        .args([
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-WindowStyle",
+            "Hidden",
+            "-Command",
+            &script,
+        ])
         .creation_flags(0x0800_0000)
         .spawn()
         .map_err(|error| format!("无法启动更新安装程序：{error}"))?;
     Ok(())
+}
+
+fn windows_command_path(path: &std::path::Path) -> String {
+    let value = path.to_string_lossy();
+    if let Some(rest) = value.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{rest}")
+    } else if let Some(rest) = value.strip_prefix(r"\\?\") {
+        rest.to_string()
+    } else {
+        value.into_owned()
+    }
+}
+
+fn powershell_literal(value: &str) -> String {
+    value.replace('\'', "''")
 }
 
 #[cfg(not(windows))]
@@ -194,5 +214,17 @@ mod tests {
         assert!(is_newer_version("0.9.9", "1.0.0"));
         assert!(!is_newer_version("0.4.1", "0.4.1"));
         assert!(!is_newer_version("0.5.0", "0.4.9"));
+    }
+
+    #[test]
+    fn normalizes_extended_windows_paths_for_restart() {
+        assert_eq!(
+            windows_command_path(std::path::Path::new(r"\\?\C:\Program Files\Codex\app.exe")),
+            r"C:\Program Files\Codex\app.exe"
+        );
+        assert_eq!(
+            powershell_literal("C:\\It's\\app.exe"),
+            "C:\\It''s\\app.exe"
+        );
     }
 }

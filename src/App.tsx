@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
   Activity, AlertCircle, Check, CheckCircle2, Clock3, Download, Folder,
-  Gauge, LogOut, Palette, RefreshCw, Settings2, ShieldCheck, Sparkles, X,
+  Gauge, LogOut, Palette, RadioTower, RefreshCw, Settings2, ShieldCheck, Sparkles, X,
 } from "lucide-react";
 import type { AppSettings, QuotaSnapshot, QuotaWindow } from "./types";
 import { EMPTY_SNAPSHOT, normalizeSettings } from "./types";
@@ -14,6 +14,13 @@ interface UpdateStatus {
   currentVersion: string;
   availableVersion?: string;
   message?: string;
+}
+
+interface RadarSnapshot {
+  models: Array<{ id: string; label: string; score?: number; status?: string; passed?: number; validTasks?: number; invalidTasks?: number; wallTime?: string }>;
+  quotaRows: Array<{ tier: string; fiveHour?: number; sevenDay?: number; basis?: string }>;
+  status?: string; signal?: string; batch?: string; quotaBatch?: string; updatedAt?: string;
+  fetchedAt?: number; source: string; attribution: string; siteUrl: string; cached: boolean; error?: string;
 }
 
 function useQuota() {
@@ -46,6 +53,16 @@ function useUpdateStatus() {
     return () => { void unlisten.then((fn) => fn()); };
   }, []);
   return status;
+}
+
+function useRadar() {
+  const [radar, setRadar] = useState<RadarSnapshot>({ models: [], quotaRows: [], source: "public_summary", attribution: "数据来自 Codex 雷达 codexradar.com", siteUrl: "https://codexradar.com", cached: false });
+  useEffect(() => {
+    invoke<RadarSnapshot>("get_radar_status").then(setRadar).catch(() => undefined);
+    const unlisten = listen<RadarSnapshot>("radar-updated", (event) => setRadar(event.payload));
+    return () => { void unlisten.then((fn) => fn()); };
+  }, []);
+  return radar;
 }
 
 function useDarkTheme(followSystem = true) {
@@ -146,6 +163,9 @@ function DetailView() {
   const { snapshot, now } = useQuota();
   const dark = useDarkTheme();
   const update = useUpdateStatus();
+  const radar = useRadar();
+  const settings = useSettings();
+  const [detailTab, setDetailTab] = useState<"quota" | "radar">("quota");
   const [refreshing, setRefreshing] = useState(false);
   const five = findWindow(snapshot.windows, "five_hour");
   const seven = findWindow(snapshot.windows, "seven_day") ?? findWindow(snapshot.windows, "thirty_day");
@@ -154,7 +174,10 @@ function DetailView() {
   return <main className="soft-shell detail-panel" data-theme={dark ? "dark" : "light"}>
     <span className="ambient-orb orb-one" /><span className="ambient-orb orb-two" />
     <WindowHeader title="Codex Quota Bar" subtitle="额度中心" icon={<Sparkles size={15} />} />
+    <nav className="detail-tabs"><button className={detailTab === "quota" ? "is-active" : ""} onClick={() => setDetailTab("quota")}><Gauge size={13} />额度</button>
+      {settings?.radarEnabled !== false && <button className={detailTab === "radar" ? "is-active" : ""} onClick={() => setDetailTab("radar")}><RadioTower size={13} />Codex Radar</button>}</nav>
     <div className="soft-scroll detail-content">
+      {detailTab === "radar" && settings?.radarEnabled !== false ? <RadarView radar={radar} /> : <>
       <section className="soft-card hero-card">
         <div className="hero-ring"><DualRing five={five} seven={seven} size={92} stroke={6.5} dark={dark} /></div>
         <div className="hero-copy"><span className="eyebrow"><Activity size={12} /> 当前可用额度</span>
@@ -169,8 +192,36 @@ function DetailView() {
         <div><button className="soft-icon-button" title="刷新" onClick={refresh}><RefreshCw size={16} className={refreshing ? "spin" : ""} /></button>
           <button className="soft-icon-button accent" title="设置" onClick={() => invoke("show_settings")}><Settings2 size={16} /></button></div>
       </footer>
+      </>}
     </div>
   </main>;
+}
+
+function radarColor(score?: number) {
+  if (score === undefined) return "#8c96a8";
+  if (score >= 110) return "#43c98a";
+  if (score >= 90) return "#7289ff";
+  if (score >= 60) return "#e5ae36";
+  return "#ef6670";
+}
+
+function RadarView({ radar }: { radar: RadarSnapshot }) {
+  const [refreshing, setRefreshing] = useState(false);
+  const refresh = async () => { setRefreshing(true); try { await invoke("refresh_radar"); } finally { setRefreshing(false); } };
+  return <div className="radar-panel">
+    <section className="soft-card radar-heading"><div><span className={`radar-live ${radar.status ?? ""}`} /><div><strong>模型能力雷达</strong><small>{radar.batch ?? "等待数据"} · Public</small></div></div>
+      <button className="soft-icon-button" title="刷新 Radar" onClick={refresh}><RefreshCw size={15} className={refreshing ? "spin" : ""} /></button></section>
+    {radar.error && <div className="soft-alert"><AlertCircle size={14} />{radar.error}{radar.cached ? "（显示缓存）" : ""}</div>}
+    {radar.signal && <div className="radar-signal"><RadioTower size={14} /><span>{radar.signal}</span></div>}
+    <div className="radar-model-grid">{radar.models.length ? radar.models.map((model) => <article className="soft-card radar-model" key={model.id} style={{ "--radar-color": radarColor(model.score) } as CSSProperties}>
+      <span>{model.label}</span><strong>{model.score?.toFixed(1) ?? "--"}</strong><small>{model.passed ?? "--"}/{model.validTasks ?? "--"}{model.invalidTasks ? ` · ${model.invalidTasks} 无效` : ""}{model.wallTime ? ` · ${model.wallTime}` : ""}</small>
+    </article>) : <div className="radar-empty">暂无模型评分，点击刷新重试</div>}</div>
+    <section className="soft-card radar-quota"><header><strong>额度雷达</strong><small>{radar.quotaBatch ?? "--"}</small></header>
+      <div className="radar-table"><div className="radar-table-head"><span>档位</span><span>5h</span><span>7d</span><span>来源</span></div>
+        {radar.quotaRows.map((row) => <div className="radar-table-row" key={row.tier}><strong>{row.tier}</strong><span>${row.fiveHour?.toFixed(2) ?? "--"}</span><span>${row.sevenDay?.toFixed(2) ?? "--"}</span><small>{row.basis?.includes("measured") ? "实测" : "推测"}</small></div>)}</div>
+    </section>
+    <footer className="radar-footer"><span>{radar.attribution}</span><span>{radar.updatedAt ? new Date(radar.updatedAt).toLocaleString("zh-CN") : "尚未更新"}</span></footer>
+  </div>;
 }
 
 function Section({ icon, title, children }: { icon: ReactNode; title: string; children: ReactNode }) {
@@ -226,6 +277,7 @@ function SettingsPanel({ value, onSaved }: { value: AppSettings; onSaved: (next:
       <ToggleSetting label="自动避让 Lyricify Lite" checked={draft.coordinateLyricify} onChange={(coordinateLyricify) => setDraft({ ...draft, coordinateLyricify })} />
       <ToggleSetting label="反转环形－额度－倒计时" checked={draft.reverseLayout} onChange={(reverseLayout) => setDraft({ ...draft, reverseLayout })} />
       <ToggleSetting label="随 Windows 登录启动" checked={draft.autostart} onChange={(autostart) => setDraft({ ...draft, autostart })} />
+      <ToggleSetting label="启用 Codex Radar" checked={draft.radarEnabled} onChange={(radarEnabled) => setDraft({ ...draft, radarEnabled })} />
     </Section>
     <Section icon={<Download size={15} />} title="软件更新">
       <div className="update-row"><div><strong>自动更新</strong><small>从 Afterlife-lh/codex-quota-bar 获取正式版本</small></div><Toggle checked={draft.autoUpdate} onChange={(autoUpdate) => setDraft({ ...draft, autoUpdate })} /></div>
