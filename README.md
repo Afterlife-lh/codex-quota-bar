@@ -1,47 +1,48 @@
 # Codex Quota Bar
 
-[![Windows](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-1674d1)](https://github.com/provance-bot/codex-quota-bar/releases)
+简体中文 | [English](README_EN.md)
+
+[![Windows](https://img.shields.io/badge/平台-Windows%2010%20%7C%2011-1674d1)](https://github.com/provance-bot/codex-quota-bar/releases)
 [![GitHub release](https://img.shields.io/github/v/release/provance-bot/codex-quota-bar)](https://github.com/provance-bot/codex-quota-bar/releases/latest)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/许可证-MIT-green.svg)](LICENSE)
 
-Codex Quota Bar is a lightweight Windows utility that reads your existing
-Codex ChatGPT login and displays the remaining 5-hour and 7-day quota directly
-beside the notification area.
+Codex Quota Bar 是一款轻量级 Windows 工具。它只读复用本机现有的 Codex
+ChatGPT 登录状态，并在 Windows 任务栏通知区域旁显示当前账户剩余的 5 小时
+和 7 天额度。
 
-## Features
+## 功能特性
 
-- Transparent two-line taskbar widget with nested 5h/7d quota rings.
-- Remaining percentage, reset countdown, continuous quota colors, and stale-data status.
-- Native tray icon with refresh, details, personalization, autostart, and exit actions.
-- Adjustable width, height, offsets, font scale, ring size, theme, and animations.
-- Windows 10 tray-left placement and Windows 11 left/right region and alignment controls.
-- Reversible ring/quota/countdown layout.
-- Smooth repositioning when task or notification icons change.
-- Optional Lyricify Lite collision avoidance (`lyrics → quota → tray`).
-- Read-only Codex authentication and no independent OAuth flow.
+- 透明双行任务栏组件，使用双同心环显示 5h/7d 剩余额度。
+- 显示剩余百分比、重置倒计时、连续状态颜色和缓存数据提示。
+- 原生托盘图标，提供立即刷新、详情、个性化设置、开机启动和退出功能。
+- 可调整宽度、高度、偏移、字体缩放、圆环大小、主题和动画。
+- Windows 10 默认放置于托盘左侧。
+- Windows 11 支持选择任务栏左/右区域及窗口左/右对齐。
+- 支持反转“环形－额度－倒计时”的排列方向。
+- 任务图标或托盘图标变化时平滑移动，并持续保持可见。
+- 可选的 Lyricify Lite 自动避让，形成“歌词 → 额度 → 托盘”布局。
+- 只读使用 Codex 登录凭据，不实现独立 OAuth 或多账户切换。
 
-## Install
+## 安装
 
-Download the current x64 MSI from [GitHub Releases](https://github.com/provance-bot/codex-quota-bar/releases/latest).
-Installing a newer MSI upgrades an existing installation.
+请从 [GitHub Releases](https://github.com/provance-bot/codex-quota-bar/releases/latest)
+下载最新的 x64 MSI 安装包。安装新版本 MSI 可以直接升级已有版本。
 
-## Privacy and compatibility
+## 隐私与兼容性
 
-- Credentials are read only from a configured Codex home, `CODEX_HOME`, or
-  `%USERPROFILE%\.codex`, in that order.
-- Access tokens never leave the Rust backend and are never written to logs.
-- Never copy your personal `auth.json` into this repository or an issue report.
-- The ChatGPT quota endpoint used by Codex is an undocumented compatibility
-  layer and may change without notice.
-- The app targets the unmodified primary Windows taskbar. Tools such as
-  ExplorerPatcher and StartAllBack are not supported.
-- Lyricify Lite coordination is enabled by default and can be disabled in the
-  appearance settings if another taskbar customization tool controls layout.
+- 凭据目录优先级为：用户设置的 Codex 目录 → `CODEX_HOME` →
+  `%USERPROFILE%\.codex`。
+- 访问令牌仅在 Rust 后端内存中用于额度查询，不会写入日志。
+- 请勿将个人 `auth.json` 上传到本仓库、Issue 或其他公开位置。
+- 本项目使用的 ChatGPT 额度端点属于非公开兼容层，未来可能发生变化。
+- 当前仅支持未经修改的主显示器 Windows 任务栏。
+- 暂不支持 ExplorerPatcher、StartAllBack 等第三方任务栏修改工具。
+- Lyricify Lite 自动避让默认启用，也可以在个性化设置中关闭。
 
-## Development
+## 本地开发
 
-Requirements: Node.js 20+, pnpm, Rust 1.77.2+, WebView2, and the Windows
-tooling required by Tauri 2.
+环境要求：Node.js 20+、pnpm、Rust 1.77.2+、WebView2，以及 Tauri 2
+在 Windows 上所需的构建工具。
 
 ```powershell
 corepack enable
@@ -49,7 +50,7 @@ pnpm install
 pnpm dev
 ```
 
-Checks and release build:
+检查与发布构建：
 
 ```powershell
 pnpm typecheck
@@ -58,10 +59,10 @@ cargo test --manifest-path src-tauri/Cargo.toml
 pnpm build
 ```
 
-The MSI is emitted under `src-tauri/target/release/bundle/msi/`.
+MSI 安装包输出到 `src-tauri/target/release/bundle/msi/`。
 
-## Attribution
+## 第三方署名
 
-The credential and quota request implementation was adapted from the
-MIT-licensed [CC Switch](https://github.com/farion1231/cc-switch) project.
-See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+凭据解析、额度窗口映射和请求实现参考了采用 MIT 许可证的
+[CC Switch](https://github.com/farion1231/cc-switch) 项目。详情请参阅
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
