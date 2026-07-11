@@ -1,6 +1,6 @@
 [package]
 name = "codex-quota-bar"
-version = "0.3.1"
+version = "0.4.0"
 description = "Codex quota display embedded beside the Windows notification area"
 authors = ["Codex Quota Bar contributors"]
 license = "MIT"

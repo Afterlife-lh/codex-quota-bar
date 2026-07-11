@@ -2,13 +2,15 @@
 
 简体中文 | [English](README_EN.md)
 
-[![Windows](https://img.shields.io/badge/平台-Windows%2010%20%7C%2011-1674d1)](https://github.com/provance-bot/codex-quota-bar/releases)
-[![GitHub release](https://img.shields.io/github/v/release/provance-bot/codex-quota-bar)](https://github.com/provance-bot/codex-quota-bar/releases/latest)
+[![Windows](https://img.shields.io/badge/平台-Windows%2010%20%7C%2011-1674d1)](https://github.com/Afterlife-lh/codex-quota-bar/releases)
+[![GitHub release](https://img.shields.io/github/v/release/Afterlife-lh/codex-quota-bar)](https://github.com/Afterlife-lh/codex-quota-bar/releases/latest)
 [![License: MIT](https://img.shields.io/badge/许可证-MIT-green.svg)](LICENSE)
 
 Codex Quota Bar 是一款轻量级 Windows 工具。它只读复用本机现有的 Codex
 ChatGPT 登录状态，并在 Windows 任务栏通知区域旁显示当前账户剩余的 5 小时
 和 7 天额度。
+
+![Codex Quota Bar 任务栏展示](QC_35dc4aadd8c7f218.png)
 
 ## 功能特性
 
@@ -25,7 +27,7 @@ ChatGPT 登录状态，并在 Windows 任务栏通知区域旁显示当前账户
 
 ## 安装
 
-请从 [GitHub Releases](https://github.com/provance-bot/codex-quota-bar/releases/latest)
+请从 [GitHub Releases](https://github.com/Afterlife-lh/codex-quota-bar/releases/latest)
 下载最新的 x64 MSI 安装包。安装新版本 MSI 可以直接升级已有版本。
 
 ## 隐私与兼容性
@@ -38,6 +40,27 @@ ChatGPT 登录状态，并在 Windows 任务栏通知区域旁显示当前账户
 - 当前仅支持未经修改的主显示器 Windows 任务栏。
 - 暂不支持 ExplorerPatcher、StartAllBack 等第三方任务栏修改工具。
 - Lyricify Lite 自动避让默认启用，也可以在个性化设置中关闭。
+
+## 更新日志
+
+### 0.4.0
+
+- 使用 Soft UI 风格重新设计额度详情页和个性化设置页，支持亮色与暗色主题。
+- 放大详情与设置界面的文字和控件说明，提升高分辨率屏幕下的可读性。
+- 增加启动动画、卡片入场、进度过渡、按钮反馈和柔和环境动画。
+- 增加 GitHub Release 自动更新，默认检查、安装新版本并重启应用。
+- 全屏程序运行或任务栏不可见时自动隐藏任务栏组件和辅助窗口。
+- 再次点击任务栏额度文字可以关闭已打开的详情页。
+- 增加 GitHub Actions Windows MSI 自动发布工作流。
+
+### 0.3.1
+
+- 修复窄宽度下倒计时裁切和反转布局重叠问题。
+
+### 0.3.0
+
+- 增加 Windows 10/11 布局识别、区域与对齐设置、排列反转和移动动画。
+- 增加异常额度跳变快速复核机制。
 
 ## 本地开发
 

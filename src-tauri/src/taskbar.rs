@@ -65,6 +65,15 @@ fn ease_out_cubic(progress: f64) -> f64 {
     1.0 - (1.0 - progress).powi(3)
 }
 
+fn covers_primary_screen(rect: Rect, width: i32, height: i32) -> bool {
+    width > 0
+        && height > 0
+        && rect.left <= 1
+        && rect.top <= 1
+        && rect.right >= width - 1
+        && rect.bottom >= height - 1
+}
+
 #[cfg(windows)]
 mod platform {
     use super::Rect;
@@ -77,10 +86,11 @@ mod platform {
         },
         UI::WindowsAndMessaging::{
             EnumChildWindows, EnumWindows, FindWindowExW, FindWindowW, GetClassNameW, GetCursorPos,
-            GetWindowLongPtrW, GetWindowRect, GetWindowThreadProcessId, IsWindowVisible,
-            SetWindowLongPtrW, SetWindowPos, ShowWindow, GWL_EXSTYLE, HWND_TOPMOST, SWP_NOACTIVATE,
-            SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, SW_SHOWNOACTIVATE,
-            WS_EX_APPWINDOW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+            GetForegroundWindow, GetSystemMetrics, GetWindowLongPtrW, GetWindowRect,
+            GetWindowThreadProcessId, IsWindowVisible, SetWindowLongPtrW, SetWindowPos, ShowWindow,
+            GWL_EXSTYLE, HWND_TOPMOST, SM_CXSCREEN, SM_CYSCREEN, SWP_NOACTIVATE, SWP_NOMOVE,
+            SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, SW_HIDE, SW_SHOWNOACTIVATE, WS_EX_APPWINDOW,
+            WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
         },
     };
 
@@ -314,6 +324,45 @@ mod platform {
         }
     }
 
+    pub fn hide_widget(hwnd: HWND) {
+        unsafe {
+            ShowWindow(hwnd, SW_HIDE);
+        }
+    }
+
+    pub fn should_hide_widget() -> bool {
+        let taskbar = unsafe { FindWindowW(wide("Shell_TrayWnd").as_ptr(), std::ptr::null()) };
+        if taskbar.is_null() || unsafe { IsWindowVisible(taskbar) } == 0 {
+            return true;
+        }
+        let Some(taskbar_rect) = rect(taskbar) else {
+            return true;
+        };
+        let (screen_width, screen_height) =
+            unsafe { (GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN)) };
+        let taskbar_on_screen = taskbar_rect.right > 0
+            && taskbar_rect.bottom > 0
+            && taskbar_rect.left < screen_width
+            && taskbar_rect.top < screen_height
+            && taskbar_rect.width().abs().min(taskbar_rect.height().abs()) >= 8;
+        if !taskbar_on_screen {
+            return true;
+        }
+        let foreground = unsafe { GetForegroundWindow() };
+        if foreground.is_null() || foreground == taskbar {
+            return false;
+        }
+        let mut class_name = [0_u16; 128];
+        let length =
+            unsafe { GetClassNameW(foreground, class_name.as_mut_ptr(), class_name.len() as i32) };
+        let class_name = String::from_utf16_lossy(&class_name[..length.max(0) as usize]);
+        if matches!(class_name.as_str(), "Progman" | "WorkerW" | "Shell_TrayWnd") {
+            return false;
+        }
+        rect(foreground)
+            .is_some_and(|value| super::covers_primary_screen(value, screen_width, screen_height))
+    }
+
     pub fn move_widget(hwnd: HWND, x: i32, y: i32) {
         unsafe {
             SetWindowPos(
@@ -348,6 +397,10 @@ mod platform {
     pub fn move_window(_: ExternalWindow, _: i32, _: i32) {}
     pub fn prepare_widget(_: *mut std::ffi::c_void) {}
     pub fn show_widget(_: *mut std::ffi::c_void) {}
+    pub fn hide_widget(_: *mut std::ffi::c_void) {}
+    pub fn should_hide_widget() -> bool {
+        false
+    }
     pub fn move_widget(_: *mut std::ffi::c_void, _: i32, _: i32) {}
 }
 
@@ -490,6 +543,30 @@ mod tests {
         assert_eq!(ease_out_cubic(0.0), 0.0);
         assert_eq!(ease_out_cubic(1.0), 1.0);
         assert!(ease_out_cubic(0.5) > 0.5);
+    }
+
+    #[test]
+    fn detects_primary_fullscreen_bounds() {
+        assert!(covers_primary_screen(
+            Rect {
+                left: 0,
+                top: 0,
+                right: 1920,
+                bottom: 1080,
+            },
+            1920,
+            1080
+        ));
+        assert!(!covers_primary_screen(
+            Rect {
+                left: 0,
+                top: 0,
+                right: 1600,
+                bottom: 900,
+            },
+            1920,
+            1080
+        ));
     }
 }
 
@@ -641,7 +718,22 @@ pub fn spawn_reposition_loop(app: AppHandle, state: std::sync::Arc<crate::AppSta
         let mut last_target: Option<WidgetTarget> = None;
         let mut animation_from = (0_i32, 0_i32);
         let mut animation_started = std::time::Instant::now();
+        let mut suppressed = false;
         loop {
+            if platform::should_hide_widget() {
+                platform::hide_widget(hwnd as _);
+                if !suppressed {
+                    for label in ["detail", "menu", "settings"] {
+                        if let Some(auxiliary) = app.get_webview_window(label) {
+                            let _ = auxiliary.hide();
+                        }
+                    }
+                }
+                suppressed = true;
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                continue;
+            }
+            suppressed = false;
             let settings = state.settings.read().await.clone();
             let now = std::time::Instant::now();
             let coordinate_lyricify =

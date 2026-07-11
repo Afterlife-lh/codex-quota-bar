@@ -33,6 +33,7 @@ export interface AppSettings {
   taskbarRegion: "left" | "right";
   windowAlignment: "left" | "right";
   reverseLayout: boolean;
+  autoUpdate: boolean;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -50,6 +51,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   taskbarRegion: "right",
   windowAlignment: "right",
   reverseLayout: false,
+  autoUpdate: true,
 };
 
 export function normalizeSettings(value?: Partial<AppSettings> | null): AppSettings {
