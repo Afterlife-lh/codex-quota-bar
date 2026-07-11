@@ -46,6 +46,13 @@ Installing a newer MSI upgrades an existing installation.
 
 ## Changelog
 
+### 0.7.0
+
+- Reworked Radar card hierarchy to emphasize model name, IQ, community perception, then rating count.
+- Removed task pass counts, the community `/10` suffix, and quota-radar table to give the eight model cards more space.
+- Added explicit Windows current-user system proxy discovery for both single-address and `http=…;https=…` formats.
+- Quota, Radar, and updater connections now re-read proxy settings without requiring an app restart.
+
 ### 0.6.0
 
 - Replaced the fixed Radar model cap with a dynamic model list, currently showing all eight IQ models from the official site.

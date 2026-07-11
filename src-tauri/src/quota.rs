@@ -66,17 +66,11 @@ enum QueryError {
     Response(String),
 }
 
-pub struct QuotaService {
-    client: reqwest::Client,
-}
+pub struct QuotaService;
 
 impl QuotaService {
     pub fn new() -> Result<Self, String> {
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(15))
-            .build()
-            .map_err(|e| format!("无法创建网络客户端: {e}"))?;
-        Ok(Self { client })
+        Ok(Self)
     }
 
     pub async fn refresh(&self, settings: &AppSettings, previous: &QuotaSnapshot) -> QuotaSnapshot {
@@ -99,8 +93,11 @@ impl QuotaService {
     }
 
     async fn query(&self, credentials: &Credentials) -> Result<Vec<QuotaWindow>, QueryError> {
-        let mut request = self
-            .client
+        // Build per refresh so changing the Windows system proxy does not
+        // require restarting the application.
+        let client =
+            crate::network::client(Duration::from_secs(15)).map_err(QueryError::Network)?;
+        let mut request = client
             .get(USAGE_URL)
             // The private usage endpoint can be served by CDN/backend nodes with
             // different snapshots. A unique query plus explicit no-cache headers

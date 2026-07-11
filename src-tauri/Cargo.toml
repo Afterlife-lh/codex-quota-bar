@@ -1,6 +1,6 @@
 [package]
 name = "codex-quota-bar"
-version = "0.6.0"
+version = "0.7.0"
 description = "Codex quota display embedded beside the Windows notification area"
 authors = ["Codex Quota Bar contributors"]
 license = "MIT"
@@ -28,3 +28,4 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Diagnostics_ToolHelp", "Win32_UI_WindowsAndMessaging"] }
+winreg = "0.55"
