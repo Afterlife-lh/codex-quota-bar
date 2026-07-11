@@ -100,7 +100,10 @@ function TaskbarView() {
   const toggleDetails = () => invoke("toggle_detail");
   const openMenu = (event: MouseEvent) => { event.preventDefault(); void invoke("show_menu"); };
   return <main className={`taskbar-widget ${snapshot.cached ? "is-stale" : ""} ${settings?.reverseLayout ? "is-reversed" : ""}`}
-    style={{ "--font-scale": settings?.fontScale ?? 1 } as CSSProperties}
+    style={{
+      "--font-scale": settings?.fontScale ?? 1,
+      "--taskbar-foreground": dark ? "#F2F5FC" : "#202631",
+    } as CSSProperties}
     onClick={toggleDetails} onContextMenu={openMenu}>
     <DualRing five={five} seven={seven} size={settings?.ringSize ?? 28} dark={dark} animated={settings?.animations ?? true} />
     <div className="quota-rows">

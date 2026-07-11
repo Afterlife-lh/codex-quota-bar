@@ -45,6 +45,12 @@ Installing a newer MSI upgrades an existing installation.
 
 ## Changelog
 
+### 0.4.1
+
+- Fixed manual and scheduled refreshes alternating between quota snapshots returned by inconsistent cache nodes.
+- Extended premature quota-increase confirmation to every window before its current reset time.
+- Fixed low-contrast countdown and separator text on dark taskbars.
+
 ### 0.4.0
 
 - Redesigned the quota details and personalization windows with light and dark Soft UI themes.

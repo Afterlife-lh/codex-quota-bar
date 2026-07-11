@@ -102,9 +102,15 @@ impl QuotaService {
         let mut request = self
             .client
             .get(USAGE_URL)
+            // The private usage endpoint can be served by CDN/backend nodes with
+            // different snapshots. A unique query plus explicit no-cache headers
+            // prevents consecutive refreshes from alternating between stale data.
+            .query(&[("_cq", now_millis().to_string())])
             .bearer_auth(&credentials.access_token)
             .header("User-Agent", "codex-cli")
-            .header("Accept", "application/json");
+            .header("Accept", "application/json")
+            .header("Cache-Control", "no-cache, no-store")
+            .header("Pragma", "no-cache");
         if let Some(account_id) = credentials.account_id.as_deref() {
             request = request.header("ChatGPT-Account-Id", account_id);
         }
@@ -232,16 +238,16 @@ pub fn is_suspicious_premature_reset(
         return false;
     }
     previous.windows.iter().any(|old| {
-        if old.kind != WindowKind::FiveHour || old.remaining_percent > 5.0 {
-            return false;
-        }
         let reset_is_still_in_future = old
             .reset_at
             .is_some_and(|reset| reset > now_millis.saturating_add(120_000));
         let Some(new) = candidate.windows.iter().find(|item| item.kind == old.kind) else {
             return false;
         };
-        reset_is_still_in_future && new.remaining_percent - old.remaining_percent >= 25.0
+        // Remaining quota should not materially increase before the current
+        // window resets. Require a second matching response before accepting
+        // such a change, regardless of whether it affects 5h, 7d, or 30d.
+        reset_is_still_in_future && new.remaining_percent - old.remaining_percent >= 10.0
     })
 }
 
@@ -334,6 +340,21 @@ mod tests {
         assert!(!is_suspicious_premature_reset(
             &snapshot(0.0, now + 60_000),
             &snapshot(91.0, now + 18_000_000),
+            now
+        ));
+    }
+
+    #[test]
+    fn detects_premature_jump_even_when_quota_is_not_exhausted() {
+        let now = 1_000_000;
+        assert!(is_suspicious_premature_reset(
+            &snapshot(70.0, now + 600_000),
+            &snapshot(98.0, now + 1_200_000),
+            now
+        ));
+        assert!(!is_suspicious_premature_reset(
+            &snapshot(70.0, now + 600_000),
+            &snapshot(69.0, now + 600_000),
             now
         ));
     }

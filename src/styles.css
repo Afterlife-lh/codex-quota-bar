@@ -10,7 +10,7 @@ button, input, select { font: inherit; }
 button { color: inherit; }
 
 /* Taskbar surface stays fully transparent. */
-.taskbar-widget { width: 100%; height: 100%; display: flex; align-items: center; gap: 9px; padding: 3px 10px; border-radius: 7px; cursor: default; user-select: none; transition: background 120ms ease, opacity 120ms ease; }
+.taskbar-widget { width: 100%; height: 100%; display: flex; align-items: center; gap: 9px; padding: 3px 10px; border-radius: 7px; color: var(--taskbar-foreground, #f2f5fc); cursor: default; user-select: none; transition: background 120ms ease, opacity 120ms ease; }
 .taskbar-widget:hover { background: rgba(255,255,255,.075); }
 .taskbar-widget:active { background: rgba(255,255,255,.12); }
 .taskbar-widget.is-reversed { flex-direction: row-reverse; }
@@ -22,8 +22,8 @@ button { color: inherit; }
 .quota-row { min-width: 0; display: flex; align-items: center; white-space: nowrap; }
 .quota-main { min-width: 0; flex: 0 1 56px; display: flex; justify-content: space-between; align-items: baseline; font-weight: 680; letter-spacing: .1px; }
 .quota-main strong { font-size: calc(11.5px * var(--font-scale, 1)); }
-.separator { flex: 0 0 7px; text-align: center; color: color-mix(in srgb, currentColor 62%, transparent); }
-.countdown { min-width: 32px; flex: 1 1 42px; color: color-mix(in srgb, currentColor 80%, transparent); text-align: right; }
+.separator { flex: 0 0 7px; text-align: center; color: color-mix(in srgb, var(--taskbar-foreground, #f2f5fc) 68%, transparent); }
+.countdown { min-width: 32px; flex: 1 1 42px; color: color-mix(in srgb, var(--taskbar-foreground, #f2f5fc) 88%, transparent); text-align: right; }
 .taskbar-widget.is-reversed .quota-row { flex-direction: row-reverse; }
 .taskbar-widget.is-reversed .countdown { text-align: left; }
 .empty-state { color: color-mix(in srgb, currentColor 72%, transparent); font-size: calc(12px * var(--font-scale, 1)); }
