@@ -2,13 +2,15 @@
 
 [简体中文](README.md) | English
 
-[![Windows](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-1674d1)](https://github.com/provance-bot/codex-quota-bar/releases)
-[![GitHub release](https://img.shields.io/github/v/release/provance-bot/codex-quota-bar)](https://github.com/provance-bot/codex-quota-bar/releases/latest)
+[![Windows](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-1674d1)](https://github.com/Afterlife-lh/codex-quota-bar/releases)
+[![GitHub release](https://img.shields.io/github/v/release/Afterlife-lh/codex-quota-bar)](https://github.com/Afterlife-lh/codex-quota-bar/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 Codex Quota Bar is a lightweight Windows utility that reads your existing
 Codex ChatGPT login and displays the remaining 5-hour and 7-day quota directly
 beside the notification area.
+
+![Codex Quota Bar taskbar preview](QC_35dc4aadd8c7f218.png)
 
 ## Features
 
@@ -25,7 +27,7 @@ beside the notification area.
 ## Install
 
 Download the current x64 MSI from
-[GitHub Releases](https://github.com/provance-bot/codex-quota-bar/releases/latest).
+[GitHub Releases](https://github.com/Afterlife-lh/codex-quota-bar/releases/latest).
 Installing a newer MSI upgrades an existing installation.
 
 ## Privacy and compatibility
@@ -40,6 +42,27 @@ Installing a newer MSI upgrades an existing installation.
   ExplorerPatcher and StartAllBack are not supported.
 - Lyricify Lite coordination is enabled by default and can be disabled in the
   appearance settings if another taskbar customization tool controls layout.
+
+## Changelog
+
+### 0.4.0
+
+- Redesigned the quota details and personalization windows with light and dark Soft UI themes.
+- Increased detail and settings text sizes for better readability on high-resolution displays.
+- Added entrance, card, progress, button-feedback, and ambient animations.
+- Added automatic GitHub Release updates with installation and app restart.
+- Hide the taskbar widget and auxiliary windows while a fullscreen app is active or the taskbar is hidden.
+- Clicking the taskbar widget again now closes the open details window.
+- Added a GitHub Actions workflow for Windows MSI releases.
+
+### 0.3.1
+
+- Fixed countdown clipping and overlap in narrow reversed layouts.
+
+### 0.3.0
+
+- Added Windows 10/11 placement detection, region/alignment controls, layout reversal, and movement animation.
+- Added confirmation for suspicious quota jumps.
 
 ## Development
 

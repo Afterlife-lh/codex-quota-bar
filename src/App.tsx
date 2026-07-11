@@ -1,10 +1,20 @@
-import { useCallback, useEffect, useMemo, useState, type CSSProperties, type MouseEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { Check, Clock3, Folder, LogOut, RefreshCw, Settings2, X } from "lucide-react";
+import {
+  Activity, AlertCircle, Check, CheckCircle2, Clock3, Download, Folder,
+  Gauge, LogOut, Palette, RefreshCw, Settings2, ShieldCheck, Sparkles, X,
+} from "lucide-react";
 import type { AppSettings, QuotaSnapshot, QuotaWindow } from "./types";
 import { EMPTY_SNAPSHOT, normalizeSettings } from "./types";
 import { findWindow, formatCountdown, quotaColor, statusText } from "./visual";
+
+interface UpdateStatus {
+  state: "idle" | "checking" | "up_to_date" | "available" | "downloading" | "installing" | "error";
+  currentVersion: string;
+  availableVersion?: string;
+  message?: string;
+}
 
 function useQuota() {
   const [snapshot, setSnapshot] = useState<QuotaSnapshot>(EMPTY_SNAPSHOT);
@@ -26,6 +36,16 @@ function useSettings() {
     return () => { void unlisten.then((fn) => fn()); };
   }, []);
   return settings;
+}
+
+function useUpdateStatus() {
+  const [status, setStatus] = useState<UpdateStatus>({ state: "idle", currentVersion: "" });
+  useEffect(() => {
+    invoke<UpdateStatus>("get_update_status").then(setStatus).catch(() => undefined);
+    const unlisten = listen<UpdateStatus>("update-status", (event) => setStatus(event.payload));
+    return () => { void unlisten.then((fn) => fn()); };
+  }, []);
+  return status;
 }
 
 function useDarkTheme(followSystem = true) {
@@ -77,11 +97,11 @@ function TaskbarView() {
   const dark = useDarkTheme(settings?.followSystemTheme ?? true);
   const five = findWindow(snapshot.windows, "five_hour");
   const seven = findWindow(snapshot.windows, "seven_day") ?? findWindow(snapshot.windows, "thirty_day");
-  const openDetails = () => invoke("show_detail");
+  const toggleDetails = () => invoke("toggle_detail");
   const openMenu = (event: MouseEvent) => { event.preventDefault(); void invoke("show_menu"); };
   return <main className={`taskbar-widget ${snapshot.cached ? "is-stale" : ""} ${settings?.reverseLayout ? "is-reversed" : ""}`}
     style={{ "--font-scale": settings?.fontScale ?? 1 } as CSSProperties}
-    onClick={openDetails} onContextMenu={openMenu}>
+    onClick={toggleDetails} onContextMenu={openMenu}>
     <DualRing five={five} seven={seven} size={settings?.ringSize ?? 28} dark={dark} animated={settings?.animations ?? true} />
     <div className="quota-rows">
       {snapshot.windows.length ? <>
@@ -93,33 +113,81 @@ function TaskbarView() {
   </main>;
 }
 
-function WindowHeader({ title }: { title: string }) {
+function WindowHeader({ title, subtitle, icon }: { title: string; subtitle: string; icon: ReactNode }) {
   return <header className="window-header" data-tauri-drag-region>
-    <div><span className="app-mark">CQ</span><strong>{title}</strong></div>
-    <button className="icon-button" aria-label="关闭" onClick={() => invoke("hide_current_window")}><X size={16} /></button>
+    <div className="brand-lockup"><span className="soft-app-mark">{icon}</span><span><strong>{title}</strong><small>{subtitle}</small></span></div>
+    <button className="soft-icon-button" aria-label="关闭" onClick={() => invoke("hide_current_window")}><X size={16} /></button>
   </header>;
 }
 
-function QuotaCard({ item, dark, now }: { item?: QuotaWindow; dark: boolean; now: number }) {
+function QuotaCard({ item, dark, now, index }: { item?: QuotaWindow; dark: boolean; now: number; index: number }) {
   const color = item ? quotaColor(item.remainingPercent, dark) : "#8a9099";
-  return <section className="quota-card">
-    <div className="card-top"><span>{item?.label ?? "额度窗口"}</span><strong style={{ color }}>{item ? `${Math.round(item.remainingPercent)}%` : "--"}</strong></div>
-    <div className="linear-track"><span style={{ width: `${item?.remainingPercent ?? 0}%`, background: color }} /></div>
-    <div className="card-meta"><span>已用 {item ? `${Math.round(item.usedPercent)}%` : "--"}</span><span><Clock3 size={12} /> {formatCountdown(item?.resetAt, false, now)}</span></div>
+  return <section className="soft-card quota-card" style={{ "--delay": `${100 + index * 80}ms` } as CSSProperties}>
+    <div className="card-top"><span><Gauge size={15} />{item?.label ?? "额度窗口"}</span><strong style={{ color }}>{item ? `${Math.round(item.remainingPercent)}%` : "--"}</strong></div>
+    <div className="soft-progress"><span style={{ width: `${item?.remainingPercent ?? 0}%`, background: color }} /></div>
+    <div className="card-meta"><span>已使用 {item ? `${Math.round(item.usedPercent)}%` : "--"}</span><span><Clock3 size={12} /> {formatCountdown(item?.resetAt, false, now)}</span></div>
     {item?.resetAt && <time>{new Date(item.resetAt).toLocaleString("zh-CN")} 重置</time>}
   </section>;
 }
 
+function UpdateBadge({ status }: { status: UpdateStatus }) {
+  const busy = ["checking", "downloading", "installing"].includes(status.state);
+  const error = status.state === "error";
+  return <span className={`update-badge ${busy ? "is-busy" : ""} ${error ? "is-error" : ""}`}>
+    {error ? <AlertCircle size={12} /> : busy ? <RefreshCw size={12} className="spin" /> : <ShieldCheck size={12} />}
+    {status.state === "available" ? `发现 ${status.availableVersion}` : status.message ?? `v${status.currentVersion}`}
+  </span>;
+}
+
+function DetailView() {
+  const { snapshot, now } = useQuota();
+  const dark = useDarkTheme();
+  const update = useUpdateStatus();
+  const [refreshing, setRefreshing] = useState(false);
+  const five = findWindow(snapshot.windows, "five_hour");
+  const seven = findWindow(snapshot.windows, "seven_day") ?? findWindow(snapshot.windows, "thirty_day");
+  const remaining = snapshot.windows.length ? Math.round(Math.min(five?.remainingPercent ?? 100, seven?.remainingPercent ?? 100)) : undefined;
+  const refresh = async () => { setRefreshing(true); try { await invoke("refresh_now"); } finally { setRefreshing(false); } };
+  return <main className="soft-shell detail-panel" data-theme={dark ? "dark" : "light"}>
+    <span className="ambient-orb orb-one" /><span className="ambient-orb orb-two" />
+    <WindowHeader title="Codex Quota Bar" subtitle="额度中心" icon={<Sparkles size={15} />} />
+    <div className="soft-scroll detail-content">
+      <section className="soft-card hero-card">
+        <div className="hero-ring"><DualRing five={five} seven={seven} size={92} stroke={6.5} dark={dark} /></div>
+        <div className="hero-copy"><span className="eyebrow"><Activity size={12} /> 当前可用额度</span>
+          <strong>{remaining !== undefined ? `${remaining}%` : statusText(snapshot.credentialStatus)}</strong>
+          <small><span className="live-dot" />{snapshot.cached ? "显示上次成功数据" : "每分钟自动同步"}</small></div>
+      </section>
+      {snapshot.error && <div className="soft-alert"><AlertCircle size={14} />{snapshot.error}</div>}
+      <QuotaCard item={five} dark={dark} now={now} index={0} />
+      <QuotaCard item={seven} dark={dark} now={now} index={1} />
+      <footer className="detail-actions">
+        <div><UpdateBadge status={update} /><small>{snapshot.queriedAt ? `额度更新于 ${new Date(snapshot.queriedAt).toLocaleTimeString("zh-CN")}` : "尚未成功查询"}</small></div>
+        <div><button className="soft-icon-button" title="刷新" onClick={refresh}><RefreshCw size={16} className={refreshing ? "spin" : ""} /></button>
+          <button className="soft-icon-button accent" title="设置" onClick={() => invoke("show_settings")}><Settings2 size={16} /></button></div>
+      </footer>
+    </div>
+  </main>;
+}
+
+function Section({ icon, title, children }: { icon: ReactNode; title: string; children: ReactNode }) {
+  return <section className="soft-card settings-section"><h3><span>{icon}</span>{title}</h3>{children}</section>;
+}
+
 function SettingsPanel({ value, onSaved }: { value: AppSettings; onSaved: (next: AppSettings) => void }) {
   const [draft, setDraft] = useState(value);
+  const [savedFlash, setSavedFlash] = useState(false);
   const [windowsGeneration, setWindowsGeneration] = useState<"windows10" | "windows11">("windows11");
+  const update = useUpdateStatus();
   useEffect(() => setDraft(value), [value]);
   useEffect(() => { void invoke<"windows10" | "windows11">("get_windows_generation").then(setWindowsGeneration); }, []);
   const save = async () => {
     const saved = await invoke<AppSettings>("save_settings", { settings: draft });
     await invoke("set_autostart", { enabled: saved.autostart });
-    onSaved(saved);
+    onSaved(saved); setSavedFlash(true); window.setTimeout(() => setSavedFlash(false), 1400);
   };
+  const checkUpdate = () => invoke("check_for_updates");
+  const installUpdate = () => invoke("install_update");
   return <div className="settings-panel">
     <div className={`settings-preview ${draft.reverseLayout ? "is-reversed" : ""}`}>
       <DualRing size={Math.min(draft.ringSize, 34)} dark={true} animated={draft.animations}
@@ -127,33 +195,51 @@ function SettingsPanel({ value, onSaved }: { value: AppSettings; onSaved: (next:
         seven={{ kind: "seven_day", label: "7 天", usedPercent: 36, remainingPercent: 64 }} />
       <div><span style={{ color: quotaColor(82, true) }}>5h&nbsp; 82%</span><small>·&nbsp; 03:21</small><span style={{ color: quotaColor(64, true) }}>7d&nbsp; 64%</span><small>·&nbsp; 4d12h</small></div>
     </div>
-    <label><span><Folder size={14} /> Codex 根目录</span><input value={draft.codexHome ?? ""} placeholder="默认：%USERPROFILE%\\.codex"
-      onChange={(event) => setDraft({ ...draft, codexHome: event.target.value || undefined })} /></label>
-    <div className="setting-section-title">尺寸与位置</div>
-    <div className="setting-grid">
-      <RangeSetting label="宽度" value={draft.displayWidth} min={140} max={420} unit="px" onChange={(displayWidth) => setDraft({ ...draft, displayWidth })} />
-      <RangeSetting label="高度" value={draft.displayHeight} min={30} max={72} unit="px" onChange={(displayHeight) => setDraft({ ...draft, displayHeight })} />
-      <RangeSetting label="水平偏移" value={draft.horizontalOffset} min={-240} max={240} unit="px" onChange={(horizontalOffset) => setDraft({ ...draft, horizontalOffset })} />
-      <RangeSetting label="垂直偏移" value={draft.verticalOffset} min={-48} max={48} unit="px" onChange={(verticalOffset) => setDraft({ ...draft, verticalOffset })} />
-    </div>
-    <div className="setting-section-title">任务栏布局 · {windowsGeneration === "windows11" ? "Windows 11" : "Windows 10"}</div>
-    {windowsGeneration === "windows11" ? <div className="setting-grid">
-      <SelectSetting label="所在区域" value={draft.taskbarRegion} onChange={(taskbarRegion) => setDraft({ ...draft, taskbarRegion })} />
-      <SelectSetting label="窗口对齐" value={draft.windowAlignment} onChange={(windowAlignment) => setDraft({ ...draft, windowAlignment })} />
-    </div> : <div className="setting-hint">Windows 10 默认固定在托盘左侧。</div>}
-    <div className="setting-section-title">外观</div>
-    <div className="setting-grid">
-      <RangeSetting label="字体缩放" value={draft.fontScale} min={0.75} max={1.6} step={0.05} unit="×" onChange={(fontScale) => setDraft({ ...draft, fontScale })} />
-      <RangeSetting label="环形大小" value={draft.ringSize} min={18} max={42} unit="px" onChange={(ringSize) => setDraft({ ...draft, ringSize })} />
-    </div>
-    <label className="toggle"><span>显示重置倒计时</span><input type="checkbox" checked={draft.showCountdown} onChange={(e) => setDraft({ ...draft, showCountdown: e.target.checked })} /></label>
-    <label className="toggle"><span>平滑动画</span><input type="checkbox" checked={draft.animations} onChange={(e) => setDraft({ ...draft, animations: e.target.checked })} /></label>
-    <label className="toggle"><span>跟随系统主题</span><input type="checkbox" checked={draft.followSystemTheme} onChange={(e) => setDraft({ ...draft, followSystemTheme: e.target.checked })} /></label>
-    <label className="toggle"><span>自动避让 Lyricify Lite</span><input type="checkbox" checked={draft.coordinateLyricify} onChange={(e) => setDraft({ ...draft, coordinateLyricify: e.target.checked })} /></label>
-    <label className="toggle"><span>反转“环形－额度－倒计时”排列</span><input type="checkbox" checked={draft.reverseLayout} onChange={(e) => setDraft({ ...draft, reverseLayout: e.target.checked })} /></label>
-    <label className="toggle"><span>随 Windows 登录启动</span><input type="checkbox" checked={draft.autostart} onChange={(e) => setDraft({ ...draft, autostart: e.target.checked })} /></label>
-    <button className="primary-button" onClick={save}><Check size={15} />保存设置</button>
+    <Section icon={<Folder size={15} />} title="Codex 账户">
+      <label className="soft-field"><span>Codex 根目录</span><input value={draft.codexHome ?? ""} placeholder="默认：%USERPROFILE%\.codex"
+        onChange={(event) => setDraft({ ...draft, codexHome: event.target.value || undefined })} /></label>
+    </Section>
+    <Section icon={<Gauge size={15} />} title="尺寸与位置">
+      <div className="setting-grid">
+        <RangeSetting label="宽度" value={draft.displayWidth} min={140} max={420} unit="px" onChange={(displayWidth) => setDraft({ ...draft, displayWidth })} />
+        <RangeSetting label="高度" value={draft.displayHeight} min={30} max={72} unit="px" onChange={(displayHeight) => setDraft({ ...draft, displayHeight })} />
+        <RangeSetting label="水平偏移" value={draft.horizontalOffset} min={-240} max={240} unit="px" onChange={(horizontalOffset) => setDraft({ ...draft, horizontalOffset })} />
+        <RangeSetting label="垂直偏移" value={draft.verticalOffset} min={-48} max={48} unit="px" onChange={(verticalOffset) => setDraft({ ...draft, verticalOffset })} />
+      </div>
+      <div className="section-divider" /><div className="subheading">任务栏布局 · {windowsGeneration === "windows11" ? "Windows 11" : "Windows 10"}</div>
+      {windowsGeneration === "windows11" ? <div className="setting-grid">
+        <SelectSetting label="所在区域" value={draft.taskbarRegion} onChange={(taskbarRegion) => setDraft({ ...draft, taskbarRegion })} />
+        <SelectSetting label="窗口对齐" value={draft.windowAlignment} onChange={(windowAlignment) => setDraft({ ...draft, windowAlignment })} />
+      </div> : <div className="setting-hint">Windows 10 默认固定在托盘左侧。</div>}
+    </Section>
+    <Section icon={<Palette size={15} />} title="外观与行为">
+      <div className="setting-grid">
+        <RangeSetting label="字体缩放" value={draft.fontScale} min={0.75} max={1.6} step={0.05} unit="×" onChange={(fontScale) => setDraft({ ...draft, fontScale })} />
+        <RangeSetting label="环形大小" value={draft.ringSize} min={18} max={42} unit="px" onChange={(ringSize) => setDraft({ ...draft, ringSize })} />
+      </div>
+      <ToggleSetting label="显示重置倒计时" checked={draft.showCountdown} onChange={(showCountdown) => setDraft({ ...draft, showCountdown })} />
+      <ToggleSetting label="平滑动画" checked={draft.animations} onChange={(animations) => setDraft({ ...draft, animations })} />
+      <ToggleSetting label="跟随系统主题" checked={draft.followSystemTheme} onChange={(followSystemTheme) => setDraft({ ...draft, followSystemTheme })} />
+      <ToggleSetting label="自动避让 Lyricify Lite" checked={draft.coordinateLyricify} onChange={(coordinateLyricify) => setDraft({ ...draft, coordinateLyricify })} />
+      <ToggleSetting label="反转环形－额度－倒计时" checked={draft.reverseLayout} onChange={(reverseLayout) => setDraft({ ...draft, reverseLayout })} />
+      <ToggleSetting label="随 Windows 登录启动" checked={draft.autostart} onChange={(autostart) => setDraft({ ...draft, autostart })} />
+    </Section>
+    <Section icon={<Download size={15} />} title="软件更新">
+      <div className="update-row"><div><strong>自动更新</strong><small>从 Afterlife-lh/codex-quota-bar 获取正式版本</small></div><Toggle checked={draft.autoUpdate} onChange={(autoUpdate) => setDraft({ ...draft, autoUpdate })} /></div>
+      <div className="update-actions"><UpdateBadge status={update} />
+        {update.state === "available" ? <button className="soft-button accent" onClick={installUpdate}><Download size={14} />安装并重启</button>
+          : <button className="soft-button" disabled={["checking", "downloading", "installing"].includes(update.state)} onClick={checkUpdate}><RefreshCw size={14} />检查更新</button>}</div>
+    </Section>
+    <button className={`primary-button ${savedFlash ? "is-saved" : ""}`} onClick={save}>{savedFlash ? <CheckCircle2 size={16} /> : <Check size={16} />}{savedFlash ? "已保存" : "保存设置"}</button>
   </div>;
+}
+
+function Toggle({ checked, onChange }: { checked: boolean; onChange: (checked: boolean) => void }) {
+  return <button type="button" className={`soft-toggle ${checked ? "is-on" : ""}`} role="switch" aria-checked={checked} onClick={() => onChange(!checked)}><span /></button>;
+}
+
+function ToggleSetting({ label, checked, onChange }: { label: string; checked: boolean; onChange: (checked: boolean) => void }) {
+  return <div className="toggle-setting"><span>{label}</span><Toggle checked={checked} onChange={onChange} /></div>;
 }
 
 function SelectSetting({ label, value, onChange }: { label: string; value: "left" | "right"; onChange: (value: "left" | "right") => void }) {
@@ -168,36 +254,13 @@ function RangeSetting({ label, value, min, max, step = 1, unit, onChange }: { la
     <input type="range" min={min} max={max} step={step} value={safeValue} onChange={(event) => onChange(Number(event.target.value))} /></label>;
 }
 
-function DetailView() {
-  const { snapshot, now } = useQuota();
-  const dark = useDarkTheme();
-  const [refreshing, setRefreshing] = useState(false);
-  const five = findWindow(snapshot.windows, "five_hour");
-  const seven = findWindow(snapshot.windows, "seven_day") ?? findWindow(snapshot.windows, "thirty_day");
-  const refresh = async () => { setRefreshing(true); try { await invoke("refresh_now"); } finally { setRefreshing(false); } };
-  return <main className="panel detail-panel">
-    <WindowHeader title="Codex Quota Bar" />
-      <section className="hero">
-        <DualRing five={five} seven={seven} size={84} stroke={6} dark={dark} />
-        <div><span>当前可用额度</span><strong>{snapshot.windows.length ? `${Math.round(Math.min(five?.remainingPercent ?? 100, seven?.remainingPercent ?? 100))}%` : statusText(snapshot.credentialStatus)}</strong>
-          <small>{snapshot.cached ? "上次成功数据" : "每分钟自动更新"}</small></div>
-      </section>
-      {snapshot.error && <div className="error-banner">{snapshot.error}</div>}
-      <QuotaCard item={five} dark={dark} now={now} />
-      <QuotaCard item={seven} dark={dark} now={now} />
-      <footer className="detail-actions">
-        <span>{snapshot.queriedAt ? `更新于 ${new Date(snapshot.queriedAt).toLocaleTimeString("zh-CN")}` : "尚未成功查询"}</span>
-        <div><button className="icon-button" title="刷新" onClick={refresh}><RefreshCw size={16} className={refreshing ? "spin" : ""} /></button>
-          <button className="icon-button" title="设置" onClick={() => invoke("show_settings")}><Settings2 size={16} /></button></div>
-      </footer>
-  </main>;
-}
-
 function SettingsView() {
   const settings = useSettings();
-  return <main className="panel settings-window">
-    <WindowHeader title="个性化设置" />
-    {settings ? <SettingsPanel value={settings} onSaved={() => undefined} /> : <div className="settings-loading">正在加载设置…</div>}
+  const dark = useDarkTheme(settings?.followSystemTheme ?? true);
+  return <main className="soft-shell settings-window" data-theme={dark ? "dark" : "light"}>
+    <span className="ambient-orb orb-one" /><span className="ambient-orb orb-two" />
+    <WindowHeader title="个性化设置" subtitle="Soft UI 控制中心" icon={<Settings2 size={15} />} />
+    <div className="soft-scroll settings-content">{settings ? <SettingsPanel value={settings} onSaved={() => undefined} /> : <div className="settings-loading"><RefreshCw className="spin" />正在加载设置…</div>}</div>
   </main>;
 }
 
@@ -205,9 +268,10 @@ function MenuView() {
   const action = useCallback(async (command: string, args?: Record<string, unknown>) => {
     await invoke(command, args); if (command !== "quit_app") await invoke("hide_current_window");
   }, []);
-  return <main className="panel context-menu">
+  return <main className="soft-shell context-menu">
     <button onClick={() => action("refresh_now")}><RefreshCw size={15} />立即刷新</button>
-    <button onClick={() => action("show_detail")}><Settings2 size={15} />详情与设置</button>
+    <button onClick={() => action("show_detail")}><Activity size={15} />额度详情</button>
+    <button onClick={() => action("show_settings")}><Settings2 size={15} />个性化设置</button>
     <div className="menu-separator" />
     <button className="danger" onClick={() => action("quit_app")}><LogOut size={15} />退出</button>
   </main>;

@@ -2,6 +2,7 @@ mod models;
 mod quota;
 mod settings;
 mod taskbar;
+mod updater;
 #[cfg(test)]
 mod visual;
 
@@ -30,10 +31,17 @@ pub struct AppState {
     last_reset_trigger: Mutex<Option<i64>>,
     pending_quota_jump: Mutex<Option<QuotaSnapshot>>,
     quota_confirmation_due: Mutex<Option<i64>>,
+    update_status: RwLock<updater::UpdateStatus>,
+    pending_update: Mutex<Option<updater::UpdateRelease>>,
 }
 
 impl AppState {
-    fn new(quota: QuotaService, settings: AppSettings, settings_path: PathBuf) -> Self {
+    fn new(
+        quota: QuotaService,
+        settings: AppSettings,
+        settings_path: PathBuf,
+        current_version: String,
+    ) -> Self {
         Self {
             quota,
             settings: RwLock::new(settings),
@@ -43,6 +51,8 @@ impl AppState {
             last_reset_trigger: Mutex::new(None),
             pending_quota_jump: Mutex::new(None),
             quota_confirmation_due: Mutex::new(None),
+            update_status: RwLock::new(updater::UpdateStatus::idle(current_version)),
+            pending_update: Mutex::new(None),
         }
     }
 }
@@ -127,6 +137,18 @@ fn show_detail(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn toggle_detail(app: AppHandle) -> Result<(), String> {
+    let detail = app
+        .get_webview_window("detail")
+        .ok_or_else(|| "detail window missing".to_string())?;
+    if detail.is_visible().map_err(|error| error.to_string())? {
+        detail.hide().map_err(|error| error.to_string())
+    } else {
+        taskbar::show_detail(&app)
+    }
+}
+
+#[tauri::command]
 fn show_menu(app: AppHandle) -> Result<(), String> {
     let _ = app.get_webview_window("detail").map(|w| w.hide());
     taskbar::show_menu(&app)
@@ -141,6 +163,159 @@ fn show_settings(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 fn get_windows_generation() -> &'static str {
     taskbar::windows_generation()
+}
+
+async fn publish_update_status(
+    app: &AppHandle,
+    state: &Arc<AppState>,
+    status: updater::UpdateStatus,
+) -> updater::UpdateStatus {
+    *state.update_status.write().await = status.clone();
+    let _ = app.emit("update-status", &status);
+    status
+}
+
+async fn run_update_check(
+    app: &AppHandle,
+    state: &Arc<AppState>,
+    auto_install: bool,
+) -> updater::UpdateStatus {
+    let current = app.package_info().version.to_string();
+    publish_update_status(
+        app,
+        state,
+        updater::UpdateStatus::with_state(current.clone(), "checking", None, None),
+    )
+    .await;
+    match updater::check(&current).await {
+        Ok(None) => {
+            *state.pending_update.lock().await = None;
+            publish_update_status(
+                app,
+                state,
+                updater::UpdateStatus::with_state(
+                    current,
+                    "up_to_date",
+                    None,
+                    Some("当前已是最新版本".into()),
+                ),
+            )
+            .await
+        }
+        Ok(Some(release)) => {
+            let version = release.version.clone();
+            let notes = release.notes.clone();
+            *state.pending_update.lock().await = Some(release.clone());
+            let available = publish_update_status(
+                app,
+                state,
+                updater::UpdateStatus::with_state(
+                    current.clone(),
+                    "available",
+                    Some(version.clone()),
+                    notes,
+                ),
+            )
+            .await;
+            if auto_install {
+                install_pending_update(app, state).await
+            } else {
+                available
+            }
+        }
+        Err(error) => {
+            publish_update_status(
+                app,
+                state,
+                updater::UpdateStatus::with_state(current, "error", None, Some(error)),
+            )
+            .await
+        }
+    }
+}
+
+async fn install_pending_update(app: &AppHandle, state: &Arc<AppState>) -> updater::UpdateStatus {
+    let current = app.package_info().version.to_string();
+    let release = state.pending_update.lock().await.clone();
+    let Some(release) = release else {
+        return publish_update_status(
+            app,
+            state,
+            updater::UpdateStatus::with_state(current, "error", None, Some("请先检查更新".into())),
+        )
+        .await;
+    };
+    publish_update_status(
+        app,
+        state,
+        updater::UpdateStatus::with_state(
+            current.clone(),
+            "downloading",
+            Some(release.version.clone()),
+            Some("正在下载更新…".into()),
+        ),
+    )
+    .await;
+    match updater::download(&release).await {
+        Ok(path) => {
+            let installing = publish_update_status(
+                app,
+                state,
+                updater::UpdateStatus::with_state(
+                    current.clone(),
+                    "installing",
+                    Some(release.version),
+                    Some("即将安装并重启…".into()),
+                ),
+            )
+            .await;
+            match updater::launch_installer(&path) {
+                Ok(()) => {
+                    app.exit(0);
+                    installing
+                }
+                Err(error) => {
+                    publish_update_status(
+                        app,
+                        state,
+                        updater::UpdateStatus::with_state(current, "error", None, Some(error)),
+                    )
+                    .await
+                }
+            }
+        }
+        Err(error) => {
+            publish_update_status(
+                app,
+                state,
+                updater::UpdateStatus::with_state(current, "error", None, Some(error)),
+            )
+            .await
+        }
+    }
+}
+
+#[tauri::command]
+async fn get_update_status(
+    state: State<'_, Arc<AppState>>,
+) -> Result<updater::UpdateStatus, String> {
+    Ok(state.update_status.read().await.clone())
+}
+
+#[tauri::command]
+async fn check_for_updates(
+    app: AppHandle,
+    state: State<'_, Arc<AppState>>,
+) -> Result<updater::UpdateStatus, String> {
+    Ok(run_update_check(&app, state.inner(), false).await)
+}
+
+#[tauri::command]
+async fn install_update(
+    app: AppHandle,
+    state: State<'_, Arc<AppState>>,
+) -> Result<updater::UpdateStatus, String> {
+    Ok(install_pending_update(&app, state.inner()).await)
 }
 
 #[tauri::command]
@@ -209,6 +384,18 @@ fn spawn_background(app: AppHandle, state: Arc<AppState>) {
                 last_periodic = now;
                 perform_refresh(&app, &state).await;
             }
+        }
+    });
+}
+
+fn spawn_update_background(app: AppHandle, state: Arc<AppState>) {
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(12)).await;
+        loop {
+            if state.settings.read().await.auto_update {
+                let _ = run_update_check(&app, &state, true).await;
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(6 * 60 * 60)).await;
         }
     });
 }
@@ -293,11 +480,17 @@ pub fn run() {
                 let _ = app.handle().autolaunch().enable();
             }
             let quota = QuotaService::new().map_err(std::io::Error::other)?;
-            let state = Arc::new(AppState::new(quota, settings.clone(), settings_path));
+            let state = Arc::new(AppState::new(
+                quota,
+                settings.clone(),
+                settings_path,
+                app.package_info().version.to_string(),
+            ));
             app.manage(state.clone());
             taskbar::position_widget(app.handle(), &settings).ok();
             taskbar::spawn_reposition_loop(app.handle().clone(), state.clone());
             spawn_background(app.handle().clone(), state.clone());
+            spawn_update_background(app.handle().clone(), state.clone());
             setup_tray(app)?;
             Ok(())
         })
@@ -334,9 +527,13 @@ pub fn run() {
             save_settings,
             set_autostart,
             show_detail,
+            toggle_detail,
             show_menu,
             show_settings,
             get_windows_generation,
+            get_update_status,
+            check_for_updates,
+            install_update,
             hide_current_window,
             quit_app
         ])
