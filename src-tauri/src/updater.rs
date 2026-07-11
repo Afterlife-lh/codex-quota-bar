@@ -63,10 +63,7 @@ struct GithubAsset {
 }
 
 pub async fn check(current_version: &str) -> Result<Option<UpdateRelease>, String> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(20))
-        .build()
-        .map_err(|error| error.to_string())?;
+    let client = crate::network::client(Duration::from_secs(20))?;
     let response = client
         .get(RELEASE_API)
         .header("User-Agent", "codex-quota-bar")
@@ -114,10 +111,7 @@ pub async fn check(current_version: &str) -> Result<Option<UpdateRelease>, Strin
 }
 
 pub async fn download(release: &UpdateRelease) -> Result<PathBuf, String> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(180))
-        .build()
-        .map_err(|error| error.to_string())?;
+    let client = crate::network::client(Duration::from_secs(180))?;
     let response = client
         .get(&release.download_url)
         .header("User-Agent", "codex-quota-bar")

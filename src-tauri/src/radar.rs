@@ -48,18 +48,11 @@ pub struct RadarQuotaRow {
     pub basis: Option<String>,
 }
 
-pub struct RadarService {
-    client: reqwest::Client,
-}
+pub struct RadarService;
 
 impl RadarService {
     pub fn new() -> Result<Self, String> {
-        Ok(Self {
-            client: reqwest::Client::builder()
-                .timeout(Duration::from_secs(12))
-                .build()
-                .map_err(|error| error.to_string())?,
-        })
+        Ok(Self)
     }
 
     pub async fn refresh(&self, previous: &RadarSnapshot) -> RadarSnapshot {
@@ -81,7 +74,7 @@ impl RadarService {
     }
 
     async fn fetch_json(&self, url: &str) -> Result<Value, String> {
-        self.client
+        crate::network::client(Duration::from_secs(12))?
             .get(url)
             .header("Accept", "application/json")
             .header("User-Agent", "codex-quota-bar/0.6")

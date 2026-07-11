@@ -214,13 +214,11 @@ function RadarView({ radar }: { radar: RadarSnapshot }) {
     {radar.error && <div className="soft-alert"><AlertCircle size={14} />{radar.error}{radar.cached ? "（显示缓存）" : ""}</div>}
     {radar.signal && <div className="radar-signal"><RadioTower size={14} /><span>{radar.signal}</span></div>}
     <div className="radar-model-grid">{radar.models.length ? radar.models.map((model) => <article className="soft-card radar-model" key={model.id} style={{ "--radar-color": radarColor(model.score) } as CSSProperties}>
-      <span>{model.label}</span><div className="radar-score-pair"><div><small>IQ</small><strong>{model.score?.toFixed(1) ?? "--"}</strong></div><div><small>社区体感</small><strong>{model.communityScore?.toFixed(1) ?? "--"}<i>/10</i></strong></div></div>
-      <small>{model.passed ?? "--"}/{model.validTasks ?? "--"}{model.invalidTasks ? ` · ${model.invalidTasks} 无效` : ""}{model.communityVotes !== undefined ? ` · ${model.communityVotes}人` : ""}</small>
+      <strong className="radar-model-name">{model.label}</strong>
+      <div className="radar-iq"><small>IQ 分数</small><strong>{model.score?.toFixed(1) ?? "--"}</strong></div>
+      <div className="radar-community"><span>社区体感</span><strong>{model.communityScore?.toFixed(1) ?? "--"}</strong></div>
+      <small className="radar-votes">{model.communityVotes !== undefined ? `${model.communityVotes} 人评分` : "暂无评分"}</small>
     </article>) : <div className="radar-empty">暂无模型评分，点击刷新重试</div>}</div>
-    <section className="soft-card radar-quota"><header><strong>额度雷达</strong><small>{radar.quotaBatch ?? "--"}</small></header>
-      <div className="radar-table"><div className="radar-table-head"><span>档位</span><span>5h</span><span>7d</span><span>来源</span></div>
-        {radar.quotaRows.map((row) => <div className="radar-table-row" key={row.tier}><strong>{row.tier}</strong><span>${row.fiveHour?.toFixed(2) ?? "--"}</span><span>${row.sevenDay?.toFixed(2) ?? "--"}</span><small>{row.basis?.includes("measured") ? "实测" : "推测"}</small></div>)}</div>
-    </section>
     <footer className="radar-footer"><span>{radar.attribution}</span><span>{radar.updatedAt ? new Date(radar.updatedAt).toLocaleString("zh-CN") : "尚未更新"}</span></footer>
   </div>;
 }

@@ -128,25 +128,16 @@ button { color: inherit; }
 .radar-signal { min-height: 38px; margin-bottom: 12px; padding: 8px 11px; border-radius: 12px; display: flex; align-items: center; gap: 8px; color: var(--muted); background: var(--surface-deep); box-shadow: inset 3px 3px 7px var(--shadow-dark), inset -3px -3px 7px var(--shadow-light); font-size: 10px; }
 .radar-signal span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .radar-model-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(105px, 1fr)); gap: 9px; margin-bottom: 12px; }
-.radar-model { min-height: 108px; padding: 10px; display: flex; flex-direction: column; overflow: hidden; border-left: 3px solid var(--radar-color); }
-.radar-model > span { min-height: 28px; overflow: hidden; color: var(--muted); font-size: 9.5px; font-weight: 650; line-height: 14px; }
-.radar-score-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; align-items: end; }
-.radar-score-pair > div { min-width: 0; display: flex; flex-direction: column; }
-.radar-score-pair small { color: var(--muted); font-size: 7.5px; }
-.radar-score-pair strong { color: var(--radar-color); font-size: 17px; line-height: 21px; font-variant-numeric: tabular-nums; }
-.radar-score-pair > div:last-child strong { color: var(--text); }
-.radar-score-pair i { color: var(--muted); font-size: 7px; font-style: normal; }
-.radar-model small { margin-top: 3px; color: var(--muted); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 9px; }
+.radar-model { min-height: 142px; padding: 11px 10px 10px; display: flex; flex-direction: column; overflow: hidden; border-top: 3px solid var(--radar-color); }
+.radar-model-name { min-height: 30px; overflow: hidden; color: var(--text); font-size: 10.5px; font-weight: 720; line-height: 14px; }
+.radar-iq { margin-top: 2px; display: flex; flex-direction: column; }
+.radar-iq small { color: var(--muted); font-size: 8px; }
+.radar-iq strong { color: var(--radar-color); font-size: 27px; line-height: 31px; font-variant-numeric: tabular-nums; }
+.radar-community { margin-top: 3px; display: flex; align-items: baseline; justify-content: space-between; gap: 5px; }
+.radar-community span { color: var(--muted); font-size: 8.5px; }
+.radar-community strong { color: var(--text); font-size: 15px; font-variant-numeric: tabular-nums; }
+.radar-votes { margin-top: 2px; color: var(--muted); font-size: 8px; }
 .radar-empty { grid-column: 1/-1; padding: 30px; text-align: center; color: var(--muted); font-size: 11px; }
-.radar-quota { padding: 13px 14px 8px; }
-.radar-quota header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
-.radar-quota header strong { font-size: 12px; }
-.radar-quota header small { color: var(--muted); font-size: 9px; }
-.radar-table-head, .radar-table-row { display: grid; grid-template-columns: 1fr 85px 92px 50px; gap: 5px; align-items: center; min-height: 29px; border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums; }
-.radar-table-head { min-height: 24px; color: var(--muted); font-size: 9px; }
-.radar-table-head span:not(:first-child), .radar-table-row span, .radar-table-row small { text-align: right; }
-.radar-table-row { font-size: 10px; }
-.radar-table-row small { color: var(--muted); }
 .radar-footer { min-height: 32px; padding: 8px 2px 0; display: flex; justify-content: space-between; gap: 10px; color: var(--muted); font-size: 9px; }
 
 /* Settings */
