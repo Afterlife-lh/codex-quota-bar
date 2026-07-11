@@ -127,10 +127,15 @@ button { color: inherit; }
 .radar-live.red, .radar-live.error { background: var(--danger); }
 .radar-signal { min-height: 38px; margin-bottom: 12px; padding: 8px 11px; border-radius: 12px; display: flex; align-items: center; gap: 8px; color: var(--muted); background: var(--surface-deep); box-shadow: inset 3px 3px 7px var(--shadow-dark), inset -3px -3px 7px var(--shadow-light); font-size: 10px; }
 .radar-signal span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.radar-model-grid { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 10px; margin-bottom: 12px; }
-.radar-model { min-height: 92px; padding: 11px; display: flex; flex-direction: column; overflow: hidden; border-left: 3px solid var(--radar-color); }
-.radar-model > span { min-height: 28px; overflow: hidden; color: var(--muted); font-size: 10px; font-weight: 650; line-height: 14px; }
-.radar-model strong { color: var(--radar-color); font-size: 22px; font-variant-numeric: tabular-nums; }
+.radar-model-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(105px, 1fr)); gap: 9px; margin-bottom: 12px; }
+.radar-model { min-height: 108px; padding: 10px; display: flex; flex-direction: column; overflow: hidden; border-left: 3px solid var(--radar-color); }
+.radar-model > span { min-height: 28px; overflow: hidden; color: var(--muted); font-size: 9.5px; font-weight: 650; line-height: 14px; }
+.radar-score-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; align-items: end; }
+.radar-score-pair > div { min-width: 0; display: flex; flex-direction: column; }
+.radar-score-pair small { color: var(--muted); font-size: 7.5px; }
+.radar-score-pair strong { color: var(--radar-color); font-size: 17px; line-height: 21px; font-variant-numeric: tabular-nums; }
+.radar-score-pair > div:last-child strong { color: var(--text); }
+.radar-score-pair i { color: var(--muted); font-size: 7px; font-style: normal; }
 .radar-model small { margin-top: 3px; color: var(--muted); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 9px; }
 .radar-empty { grid-column: 1/-1; padding: 30px; text-align: center; color: var(--muted); font-size: 11px; }
 .radar-quota { padding: 13px 14px 8px; }

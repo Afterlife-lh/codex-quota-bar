@@ -10,7 +10,6 @@ permissions:
 
 jobs:
   build-windows:
-    if: github.ref_name != 'v0.5.0'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4

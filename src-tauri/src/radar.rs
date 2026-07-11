@@ -1,8 +1,10 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::HashMap;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const PUBLIC_RADAR_URL: &str = "https://codexradar.com/current.json";
+const PUBLIC_RATINGS_URL: &str = "https://codexradar.com/api/model-ratings";
 
 #[derive(Debug, Clone, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -33,6 +35,8 @@ pub struct RadarModel {
     pub valid_tasks: Option<i64>,
     pub invalid_tasks: Option<i64>,
     pub wall_time: Option<String>,
+    pub community_score: Option<f64>,
+    pub community_votes: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -59,25 +63,36 @@ impl RadarService {
     }
 
     pub async fn refresh(&self, previous: &RadarSnapshot) -> RadarSnapshot {
-        let result = self
-            .client
-            .get(PUBLIC_RADAR_URL)
+        let summary = self.fetch_json(PUBLIC_RADAR_URL);
+        let ratings = self.fetch_json(PUBLIC_RATINGS_URL);
+        let (result, ratings) = tokio::join!(summary, ratings);
+        match result {
+            Ok(value) => match parse_summary(&value, now_millis()) {
+                Ok(mut snapshot) => {
+                    if let Ok(value) = ratings {
+                        apply_ratings(&mut snapshot, &value);
+                    }
+                    snapshot
+                }
+                Err(error) => merge_failure(previous, format!("Radar 数据格式错误：{error}")),
+            },
+            Err(error) => merge_failure(previous, error),
+        }
+    }
+
+    async fn fetch_json(&self, url: &str) -> Result<Value, String> {
+        self.client
+            .get(url)
             .header("Accept", "application/json")
-            .header("User-Agent", "codex-quota-bar/0.5")
+            .header("User-Agent", "codex-quota-bar/0.6")
             .header("Cache-Control", "no-cache")
             .send()
             .await
             .and_then(|response| response.error_for_status())
-            .map_err(|error| safe_error(&error));
-        match result {
-            Ok(response) => match response.json::<Value>().await {
-                Ok(value) => parse_summary(&value, now_millis()).unwrap_or_else(|error| {
-                    merge_failure(previous, format!("Radar 数据格式错误：{error}"))
-                }),
-                Err(error) => merge_failure(previous, format!("Radar 响应无法解析：{error}")),
-            },
-            Err(error) => merge_failure(previous, error),
-        }
+            .map_err(|error| safe_error(&error))?
+            .json::<Value>()
+            .await
+            .map_err(|error| format!("Radar 响应无法解析：{error}"))
     }
 }
 
@@ -97,6 +112,65 @@ fn parse_model(id: String, label: String, value: &Value) -> RadarModel {
             .or_else(|| value.get("invalid"))
             .and_then(Value::as_i64),
         wall_time: text(value, "wall_time_human"),
+        community_score: None,
+        community_votes: None,
+    }
+}
+
+fn model_id(value: &Value) -> Option<String> {
+    let model = text(value, "model")?.to_ascii_lowercase();
+    let effort = text(value, "reasoning_effort")?.to_ascii_lowercase();
+    Some(format!("{model}-{effort}"))
+}
+
+fn model_sort_key(model: &RadarModel) -> (u8, u8, String) {
+    let id = model.id.to_ascii_lowercase();
+    let family = if id.contains("-sol-") {
+        0
+    } else if id.contains("-terra-") {
+        1
+    } else if id.contains("-luna-") {
+        2
+    } else {
+        3
+    };
+    let effort = if id.ends_with("-max") {
+        0
+    } else if id.ends_with("-xhigh") {
+        1
+    } else if id.ends_with("-high") {
+        2
+    } else if id.ends_with("-medium") {
+        3
+    } else if id.ends_with("-low") {
+        4
+    } else {
+        5
+    };
+    (family, effort, id)
+}
+
+#[derive(Debug, Deserialize)]
+struct RatingModel {
+    id: String,
+    average: Option<f64>,
+    count: Option<i64>,
+}
+
+fn apply_ratings(snapshot: &mut RadarSnapshot, root: &Value) {
+    let ratings: HashMap<String, RatingModel> = root
+        .get("models")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|value| serde_json::from_value::<RatingModel>(value.clone()).ok())
+        .map(|rating| (rating.id.to_ascii_lowercase(), rating))
+        .collect();
+    for model in &mut snapshot.models {
+        if let Some(rating) = ratings.get(&model.id.to_ascii_lowercase()) {
+            model.community_score = rating.average;
+            model.community_votes = rating.count;
+        }
     }
 }
 
@@ -110,7 +184,8 @@ fn parse_summary(root: &Value, fetched_at: i64) -> Result<RadarSnapshot, String>
         let model = text(latest, "model").unwrap_or_else(|| "Latest".into());
         let effort = text(latest, "reasoning_effort").unwrap_or_default();
         let label = format!("{} {}", model, effort).trim().to_string();
-        models.push(parse_model("latest".into(), label, latest));
+        let id = model_id(latest).unwrap_or_else(|| "latest".into());
+        models.push(parse_model(id, label, latest));
     }
     if let Some(comparisons) = model_iq.get("comparisons").and_then(Value::as_object) {
         let mut entries = comparisons.iter().collect::<Vec<_>>();
@@ -120,10 +195,14 @@ fn parse_summary(root: &Value, fetched_at: i64) -> Result<RadarSnapshot, String>
                 continue;
             };
             let label = text(comparison, "label").unwrap_or_else(|| key.replace('_', " "));
-            models.push(parse_model(key.clone(), label, latest));
+            let id = model_id(latest)
+                .or_else(|| model_id(comparison))
+                .unwrap_or_else(|| key.replace('_', "-"));
+            models.push(parse_model(id, label, latest));
         }
     }
-    models.truncate(6);
+    models.sort_by_key(model_sort_key);
+    models.dedup_by(|left, right| left.id.eq_ignore_ascii_case(&right.id));
 
     let quota = model_iq.get("quota_radar");
     let quota_rows = quota
@@ -221,5 +300,49 @@ mod tests {
         assert_eq!(snapshot.models[1].label, "Future high");
         assert_eq!(snapshot.quota_rows[0].five_hour, Some(328.15));
         assert_eq!(snapshot.fetched_at, Some(42));
+    }
+
+    #[test]
+    fn joins_community_scores_by_stable_model_identity() {
+        let mut snapshot = RadarSnapshot {
+            models: vec![parse_model(
+                "gpt-5.6-sol-max".into(),
+                "GPT-5.6 Sol max".into(),
+                &serde_json::json!({"score": 135}),
+            )],
+            ..RadarSnapshot::default()
+        };
+        apply_ratings(
+            &mut snapshot,
+            &serde_json::json!({"models":[{"id":"gpt-5.6-sol-max","average":8.5,"count":115}]}),
+        );
+        assert_eq!(snapshot.models[0].community_score, Some(8.5));
+        assert_eq!(snapshot.models[0].community_votes, Some(115));
+    }
+
+    #[test]
+    fn sorts_known_families_and_efforts_in_site_order() {
+        let mut models = [
+            ("gpt-5.6-luna-medium", "Luna medium"),
+            ("gpt-5.6-sol-low", "Sol low"),
+            ("gpt-5.6-terra-xhigh", "Terra xhigh"),
+            ("gpt-5.6-sol-max", "Sol max"),
+        ]
+        .into_iter()
+        .map(|(id, label)| parse_model(id.into(), label.into(), &serde_json::json!({})))
+        .collect::<Vec<_>>();
+        models.sort_by_key(model_sort_key);
+        assert_eq!(
+            models
+                .iter()
+                .map(|model| model.id.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "gpt-5.6-sol-max",
+                "gpt-5.6-sol-low",
+                "gpt-5.6-terra-xhigh",
+                "gpt-5.6-luna-medium"
+            ]
+        );
     }
 }

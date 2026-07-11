@@ -46,6 +46,14 @@ Installing a newer MSI upgrades an existing installation.
 
 ## Changelog
 
+### 0.6.0
+
+- Replaced the fixed Radar model cap with a dynamic model list, currently showing all eight IQ models from the official site.
+- Matched the official order: Sol max→low, Terra xhigh→medium, then Luna medium; future models are appended automatically.
+- Added rolling 24-hour community perception averages and vote counts to each IQ card.
+- Changed Radar background refresh to five minutes to match the public rating cache.
+- Restored GitHub Actions MSI builds to validate the remote auto-update path.
+
 ### 0.5.0
 
 - Added a Codex Radar detail view backed by the codexradar.com public summary, including dynamic model scores, task results, quota tiers, and radar signals.

@@ -440,7 +440,8 @@ fn spawn_radar_background(app: AppHandle, state: Arc<AppState>) {
             if state.settings.read().await.radar_enabled {
                 let _ = perform_radar_refresh(&app, &state).await;
             }
-            tokio::time::sleep(std::time::Duration::from_secs(30 * 60)).await;
+            // The public community-rating cache advertises a five-minute refresh.
+            tokio::time::sleep(std::time::Duration::from_secs(5 * 60)).await;
         }
     });
 }
