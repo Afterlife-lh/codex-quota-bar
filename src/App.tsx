@@ -17,7 +17,7 @@ interface UpdateStatus {
 }
 
 interface RadarSnapshot {
-  models: Array<{ id: string; label: string; score?: number; status?: string; passed?: number; validTasks?: number; invalidTasks?: number; wallTime?: string }>;
+  models: Array<{ id: string; label: string; score?: number; status?: string; passed?: number; validTasks?: number; invalidTasks?: number; wallTime?: string; communityScore?: number; communityVotes?: number }>;
   quotaRows: Array<{ tier: string; fiveHour?: number; sevenDay?: number; basis?: string }>;
   status?: string; signal?: string; batch?: string; quotaBatch?: string; updatedAt?: string;
   fetchedAt?: number; source: string; attribution: string; siteUrl: string; cached: boolean; error?: string;
@@ -214,7 +214,8 @@ function RadarView({ radar }: { radar: RadarSnapshot }) {
     {radar.error && <div className="soft-alert"><AlertCircle size={14} />{radar.error}{radar.cached ? "（显示缓存）" : ""}</div>}
     {radar.signal && <div className="radar-signal"><RadioTower size={14} /><span>{radar.signal}</span></div>}
     <div className="radar-model-grid">{radar.models.length ? radar.models.map((model) => <article className="soft-card radar-model" key={model.id} style={{ "--radar-color": radarColor(model.score) } as CSSProperties}>
-      <span>{model.label}</span><strong>{model.score?.toFixed(1) ?? "--"}</strong><small>{model.passed ?? "--"}/{model.validTasks ?? "--"}{model.invalidTasks ? ` · ${model.invalidTasks} 无效` : ""}{model.wallTime ? ` · ${model.wallTime}` : ""}</small>
+      <span>{model.label}</span><div className="radar-score-pair"><div><small>IQ</small><strong>{model.score?.toFixed(1) ?? "--"}</strong></div><div><small>社区体感</small><strong>{model.communityScore?.toFixed(1) ?? "--"}<i>/10</i></strong></div></div>
+      <small>{model.passed ?? "--"}/{model.validTasks ?? "--"}{model.invalidTasks ? ` · ${model.invalidTasks} 无效` : ""}{model.communityVotes !== undefined ? ` · ${model.communityVotes}人` : ""}</small>
     </article>) : <div className="radar-empty">暂无模型评分，点击刷新重试</div>}</div>
     <section className="soft-card radar-quota"><header><strong>额度雷达</strong><small>{radar.quotaBatch ?? "--"}</small></header>
       <div className="radar-table"><div className="radar-table-head"><span>档位</span><span>5h</span><span>7d</span><span>来源</span></div>
