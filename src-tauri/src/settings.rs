@@ -31,6 +31,7 @@ pub struct AppSettings {
     pub window_alignment: TaskbarSide,
     pub reverse_layout: bool,
     pub auto_update: bool,
+    pub radar_enabled: bool,
 }
 
 impl Default for AppSettings {
@@ -52,6 +53,7 @@ impl Default for AppSettings {
             window_alignment: TaskbarSide::Right,
             reverse_layout: false,
             auto_update: true,
+            radar_enabled: true,
         }
     }
 }
@@ -122,5 +124,6 @@ mod tests {
         assert_eq!(parsed.window_alignment, TaskbarSide::Right);
         assert!(!parsed.reverse_layout);
         assert!(parsed.auto_update);
+        assert!(parsed.radar_enabled);
     }
 }

@@ -1,5 +1,6 @@
 mod models;
 mod quota;
+mod radar;
 mod settings;
 mod taskbar;
 mod updater;
@@ -33,6 +34,8 @@ pub struct AppState {
     quota_confirmation_due: Mutex<Option<i64>>,
     update_status: RwLock<updater::UpdateStatus>,
     pending_update: Mutex<Option<updater::UpdateRelease>>,
+    radar: radar::RadarService,
+    radar_snapshot: RwLock<radar::RadarSnapshot>,
 }
 
 impl AppState {
@@ -41,6 +44,7 @@ impl AppState {
         settings: AppSettings,
         settings_path: PathBuf,
         current_version: String,
+        radar: radar::RadarService,
     ) -> Self {
         Self {
             quota,
@@ -53,6 +57,8 @@ impl AppState {
             quota_confirmation_due: Mutex::new(None),
             update_status: RwLock::new(updater::UpdateStatus::idle(current_version)),
             pending_update: Mutex::new(None),
+            radar,
+            radar_snapshot: RwLock::new(radar::RadarSnapshot::default()),
         }
     }
 }
@@ -100,6 +106,30 @@ async fn refresh_now(
     Ok(perform_refresh(&app, &state).await)
 }
 
+async fn perform_radar_refresh(app: &AppHandle, state: &Arc<AppState>) -> radar::RadarSnapshot {
+    if !state.settings.read().await.radar_enabled {
+        return radar::RadarSnapshot::default();
+    }
+    let previous = state.radar_snapshot.read().await.clone();
+    let next = state.radar.refresh(&previous).await;
+    *state.radar_snapshot.write().await = next.clone();
+    let _ = app.emit("radar-updated", &next);
+    next
+}
+
+#[tauri::command]
+async fn get_radar_status(state: State<'_, Arc<AppState>>) -> Result<radar::RadarSnapshot, String> {
+    Ok(state.radar_snapshot.read().await.clone())
+}
+
+#[tauri::command]
+async fn refresh_radar(
+    app: AppHandle,
+    state: State<'_, Arc<AppState>>,
+) -> Result<radar::RadarSnapshot, String> {
+    Ok(perform_radar_refresh(&app, state.inner()).await)
+}
+
 #[tauri::command]
 async fn get_settings(state: State<'_, Arc<AppState>>) -> Result<AppSettings, String> {
     Ok(state.settings.read().await.clone())
@@ -117,6 +147,9 @@ async fn save_settings(
     taskbar::position_widget(&app, &settings)?;
     let _ = app.emit("settings-updated", &settings);
     let _ = perform_refresh(&app, &state).await;
+    if settings.radar_enabled {
+        let _ = perform_radar_refresh(&app, &state).await;
+    }
     Ok(settings)
 }
 
@@ -400,6 +433,18 @@ fn spawn_update_background(app: AppHandle, state: Arc<AppState>) {
     });
 }
 
+fn spawn_radar_background(app: AppHandle, state: Arc<AppState>) {
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(4)).await;
+        loop {
+            if state.settings.read().await.radar_enabled {
+                let _ = perform_radar_refresh(&app, &state).await;
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(30 * 60)).await;
+        }
+    });
+}
+
 fn auth_stamp(settings: &AppSettings) -> Option<(u64, u64)> {
     let metadata = std::fs::metadata(quota::auth_path(settings)).ok()?;
     let modified = metadata
@@ -480,17 +525,20 @@ pub fn run() {
                 let _ = app.handle().autolaunch().enable();
             }
             let quota = QuotaService::new().map_err(std::io::Error::other)?;
+            let radar = radar::RadarService::new().map_err(std::io::Error::other)?;
             let state = Arc::new(AppState::new(
                 quota,
                 settings.clone(),
                 settings_path,
                 app.package_info().version.to_string(),
+                radar,
             ));
             app.manage(state.clone());
             taskbar::position_widget(app.handle(), &settings).ok();
             taskbar::spawn_reposition_loop(app.handle().clone(), state.clone());
             spawn_background(app.handle().clone(), state.clone());
             spawn_update_background(app.handle().clone(), state.clone());
+            spawn_radar_background(app.handle().clone(), state.clone());
             setup_tray(app)?;
             Ok(())
         })
@@ -523,6 +571,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_status,
             refresh_now,
+            get_radar_status,
+            refresh_radar,
             get_settings,
             save_settings,
             set_autostart,

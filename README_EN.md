@@ -17,6 +17,7 @@ beside the notification area.
 - Transparent two-line taskbar widget with nested 5h/7d quota rings.
 - Remaining percentage, reset countdown, continuous quota colors, and stale-data status.
 - Native tray icon with refresh, details, personalization, autostart, and exit actions.
+- Built-in Codex Radar view for public model scores, quota radar, and current signals.
 - Adjustable width, height, offsets, font scale, ring size, theme, and animations.
 - Windows 10 tray-left placement and Windows 11 left/right region and alignment controls.
 - Reversible ring/quota/countdown layout.
@@ -44,6 +45,13 @@ Installing a newer MSI upgrades an existing installation.
   appearance settings if another taskbar customization tool controls layout.
 
 ## Changelog
+
+### 0.5.0
+
+- Added a Codex Radar detail view backed by the codexradar.com public summary, including dynamic model scores, task results, quota tiers, and radar signals.
+- Added a Codex Radar setting, manual refresh, and 30-minute background refresh.
+- Fixed post-update restart failures caused by Windows extended `\\?\` paths being parsed as a missing `\\` file.
+- Replaced the `cmd start` updater helper with a hidden PowerShell MSI installer and safe process restart.
 
 ### 0.4.1
 
@@ -97,3 +105,7 @@ The MSI is emitted under `src-tauri/target/release/bundle/msi/`.
 The credential and quota request implementation was adapted from the
 MIT-licensed [CC Switch](https://github.com/farion1231/cc-switch) project.
 See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+The Codex Radar integration design was adapted from the MIT-licensed
+[codex-monitor-macos](https://github.com/jackiemingnew/codex-monitor-macos),
+with public data attributed to [codexradar.com](https://codexradar.com).

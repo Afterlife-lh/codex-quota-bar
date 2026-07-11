@@ -17,6 +17,7 @@ ChatGPT 登录状态，并在 Windows 任务栏通知区域旁显示当前账户
 - 透明双行任务栏组件，使用双同心环显示 5h/7d 剩余额度。
 - 显示剩余百分比、重置倒计时、连续状态颜色和缓存数据提示。
 - 原生托盘图标，提供立即刷新、详情、个性化设置、开机启动和退出功能。
+- 详情页内置 Codex Radar，展示公开模型评分、额度雷达与最新信号摘要。
 - 可调整宽度、高度、偏移、字体缩放、圆环大小、主题和动画。
 - Windows 10 默认放置于托盘左侧。
 - Windows 11 支持选择任务栏左/右区域及窗口左/右对齐。
@@ -42,6 +43,13 @@ ChatGPT 登录状态，并在 Windows 任务栏通知区域旁显示当前账户
 - Lyricify Lite 自动避让默认启用，也可以在个性化设置中关闭。
 
 ## 更新日志
+
+### 0.5.0
+
+- 新增 Codex Radar 详情页，读取 codexradar.com 公共摘要并展示动态模型评分、任务结果、额度档位和雷达信号。
+- 设置页增加 Codex Radar 开关，支持手动刷新与 30 分钟后台刷新。
+- 修复内置更新完成后，Windows 将 `\\?\` 扩展路径误解析为 `\\` 文件而无法重启的问题。
+- 更新助手改用隐藏 PowerShell 进程执行 MSI、清理安装包并安全重启应用。
 
 ### 0.4.1
 
@@ -95,3 +103,7 @@ MSI 安装包输出到 `src-tauri/target/release/bundle/msi/`。
 凭据解析、额度窗口映射和请求实现参考了采用 MIT 许可证的
 [CC Switch](https://github.com/farion1231/cc-switch) 项目。详情请参阅
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+
+Codex Radar 集成设计参考了 MIT 许可的
+[codex-monitor-macos](https://github.com/jackiemingnew/codex-monitor-macos)，
+公开数据来自 [codexradar.com](https://codexradar.com)。
