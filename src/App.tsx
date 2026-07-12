@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   Activity, AlertCircle, Check, CheckCircle2, Clock3, Download, Folder,
-  Gauge, LogOut, Palette, RadioTower, RefreshCw, Settings2, ShieldCheck, Sparkles, X,
+  Gauge, LogOut, Moon, Palette, RadioTower, RefreshCw, Settings2, ShieldCheck, Sparkles, Sun, X,
 } from "lucide-react";
 import type { AppSettings, QuotaSnapshot, QuotaWindow } from "./types";
 import { EMPTY_SNAPSHOT, normalizeSettings } from "./types";
@@ -17,7 +18,7 @@ interface UpdateStatus {
 }
 
 interface RadarSnapshot {
-  models: Array<{ id: string; label: string; score?: number; status?: string; passed?: number; validTasks?: number; invalidTasks?: number; wallTime?: string; communityScore?: number; communityVotes?: number }>;
+  models: Array<{ id: string; label: string; score?: number; status?: string; passed?: number; validTasks?: number; invalidTasks?: number; wallTime?: string; costUsd?: number; communityScore?: number; communityVotes?: number }>;
   quotaRows: Array<{ tier: string; fiveHour?: number; sevenDay?: number; basis?: string }>;
   status?: string; signal?: string; batch?: string; quotaBatch?: string; updatedAt?: string;
   fetchedAt?: number; source: string; attribution: string; siteUrl: string; cached: boolean; error?: string;
@@ -74,6 +75,23 @@ function useDarkTheme(followSystem = true) {
     return () => query.removeEventListener("change", listener);
   }, [query]);
   return followSystem ? dark : true;
+}
+
+function trackPointer(event: MouseEvent<HTMLElement>) {
+  const element = event.currentTarget;
+  const rect = element.getBoundingClientRect();
+  const x = (event.clientX - rect.left) / rect.width;
+  const y = (event.clientY - rect.top) / rect.height;
+  element.style.setProperty("--pointer-x", `${x * 100}%`);
+  element.style.setProperty("--pointer-y", `${y * 100}%`);
+  element.style.setProperty("--tilt-x", `${(0.5 - y) * 3.2}deg`);
+  element.style.setProperty("--tilt-y", `${(x - 0.5) * 3.2}deg`);
+}
+
+function resetPointer(event: MouseEvent<HTMLElement>) {
+  const element = event.currentTarget;
+  element.style.setProperty("--tilt-x", "0deg");
+  element.style.setProperty("--tilt-y", "0deg");
 }
 
 function DualRing({ five, seven, size = 28, stroke = 2.3, dark, animated = true }: {
@@ -133,16 +151,16 @@ function TaskbarView() {
   </main>;
 }
 
-function WindowHeader({ title, subtitle, icon }: { title: string; subtitle: string; icon: ReactNode }) {
+function WindowHeader({ title, subtitle, icon, actions, onClose }: { title: string; subtitle: string; icon: ReactNode; actions?: ReactNode; onClose?: () => void }) {
   return <header className="window-header" data-tauri-drag-region>
     <div className="brand-lockup"><span className="soft-app-mark">{icon}</span><span><strong>{title}</strong><small>{subtitle}</small></span></div>
-    <button className="soft-icon-button" aria-label="关闭" onClick={() => invoke("hide_current_window")}><X size={16} /></button>
+    <div className="window-actions">{actions}<button className="soft-icon-button" aria-label="关闭" onClick={onClose ?? (() => { void invoke("hide_current_window"); })}><X size={16} /></button></div>
   </header>;
 }
 
 function QuotaCard({ item, dark, now, index }: { item?: QuotaWindow; dark: boolean; now: number; index: number }) {
   const color = item ? quotaColor(item.remainingPercent, dark) : "#8a9099";
-  return <section className="soft-card quota-card" style={{ "--delay": `${100 + index * 80}ms` } as CSSProperties}>
+  return <section className="soft-card quota-card interactive-surface" data-reveal style={{ "--delay": `${100 + index * 80}ms`, "--reveal-delay": `${index * 70}ms` } as CSSProperties} onMouseMove={trackPointer} onMouseLeave={resetPointer}>
     <div className="card-top"><span><Gauge size={15} />{item?.label ?? "额度窗口"}</span><strong style={{ color }}>{item ? `${Math.round(item.remainingPercent)}%` : "--"}</strong></div>
     <div className="soft-progress"><span style={{ width: `${item?.remainingPercent ?? 0}%`, background: color }} /></div>
     <div className="card-meta"><span>已使用 {item ? `${Math.round(item.usedPercent)}%` : "--"}</span><span><Clock3 size={12} /> {formatCountdown(item?.resetAt, false, now)}</span></div>
@@ -161,24 +179,89 @@ function UpdateBadge({ status }: { status: UpdateStatus }) {
 
 function DetailView() {
   const { snapshot, now } = useQuota();
-  const dark = useDarkTheme();
+  const systemDark = useDarkTheme();
+  const [themeOverride, setThemeOverride] = useState<"light" | "dark" | null>(() => {
+    const saved = window.localStorage.getItem("detail-theme");
+    return saved === "light" || saved === "dark" ? saved : null;
+  });
+  const dark = themeOverride ? themeOverride === "dark" : systemDark;
   const update = useUpdateStatus();
   const radar = useRadar();
   const settings = useSettings();
   const [detailTab, setDetailTab] = useState<"quota" | "radar">("quota");
   const [refreshing, setRefreshing] = useState(false);
+  const [windowCycle, setWindowCycle] = useState(0);
+  const [windowPhase, setWindowPhase] = useState<"entering" | "visible" | "leaving">("entering");
+  const closeTimer = useRef<number>();
+  const closing = useRef(false);
+  const hasFocused = useRef(false);
   const five = findWindow(snapshot.windows, "five_hour");
   const seven = findWindow(snapshot.windows, "seven_day") ?? findWindow(snapshot.windows, "thirty_day");
   const remaining = snapshot.windows.length ? Math.round(Math.min(five?.remainingPercent ?? 100, seven?.remainingPercent ?? 100)) : undefined;
   const refresh = async () => { setRefreshing(true); try { await invoke("refresh_now"); } finally { setRefreshing(false); } };
-  return <main className="soft-shell detail-panel" data-theme={dark ? "dark" : "light"}>
+  const closeAnimated = useCallback(() => {
+    if (closing.current) return;
+    closing.current = true;
+    setWindowPhase("leaving");
+    window.clearTimeout(closeTimer.current);
+    closeTimer.current = window.setTimeout(async () => {
+      await invoke("hide_current_window");
+      closing.current = false;
+      setWindowPhase("entering");
+    }, 210);
+  }, []);
+  useEffect(() => {
+    const current = getCurrentWindow();
+    const focusListener = current.onFocusChanged(({ payload }) => {
+      if (payload) {
+        hasFocused.current = true;
+        closing.current = false;
+        window.clearTimeout(closeTimer.current);
+        setWindowCycle((value) => value + 1);
+        setWindowPhase("entering");
+        window.setTimeout(() => setWindowPhase("visible"), 360);
+      } else if (hasFocused.current) {
+        closeAnimated();
+      }
+    });
+    const closeListener = listen("request-detail-close", closeAnimated);
+    return () => {
+      window.clearTimeout(closeTimer.current);
+      void focusListener.then((unlisten) => unlisten());
+      void closeListener.then((unlisten) => unlisten());
+    };
+  }, [closeAnimated]);
+  useEffect(() => {
+    const root = document.querySelector(".detail-content");
+    const elements = root?.querySelectorAll<HTMLElement>("[data-reveal]");
+    if (!elements?.length) return;
+    if (!("IntersectionObserver" in window)) {
+      elements.forEach((element) => element.classList.add("is-revealed"));
+      return;
+    }
+    const observer = new IntersectionObserver((entries) => entries.forEach((entry) => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add("is-revealed");
+        observer.unobserve(entry.target);
+      }
+    }), { root, threshold: 0.14 });
+    elements.forEach((element) => observer.observe(element));
+    return () => observer.disconnect();
+  }, [detailTab, radar.models.length, snapshot.windows.length, windowCycle]);
+  const toggleTheme = () => {
+    const next = dark ? "light" : "dark";
+    window.localStorage.setItem("detail-theme", next);
+    setThemeOverride(next);
+  };
+  return <main key={windowCycle} className={`soft-shell detail-panel window-${windowPhase}`} data-theme={dark ? "dark" : "light"}>
     <span className="ambient-orb orb-one" /><span className="ambient-orb orb-two" />
-    <WindowHeader title="Codex Quota Bar" subtitle="额度中心" icon={<Sparkles size={15} />} />
+    <WindowHeader title="Codex Quota Bar" subtitle="额度中心" icon={<Sparkles size={15} />} onClose={closeAnimated}
+      actions={<button className="soft-icon-button theme-button" aria-label={dark ? "切换为亮色主题" : "切换为暗色主题"} title={dark ? "切换为亮色主题" : "切换为暗色主题"} onClick={toggleTheme}>{dark ? <Sun size={16} /> : <Moon size={16} />}</button>} />
     <nav className="detail-tabs"><button className={detailTab === "quota" ? "is-active" : ""} onClick={() => setDetailTab("quota")}><Gauge size={13} />额度</button>
       {settings?.radarEnabled !== false && <button className={detailTab === "radar" ? "is-active" : ""} onClick={() => setDetailTab("radar")}><RadioTower size={13} />Codex Radar</button>}</nav>
     <div className="soft-scroll detail-content">
       {detailTab === "radar" && settings?.radarEnabled !== false ? <RadarView radar={radar} /> : <>
-      <section className="soft-card hero-card">
+      <section className="soft-card hero-card interactive-surface" data-reveal onMouseMove={trackPointer} onMouseLeave={resetPointer}>
         <div className="hero-ring"><DualRing five={five} seven={seven} size={92} stroke={6.5} dark={dark} /></div>
         <div className="hero-copy"><span className="eyebrow"><Activity size={12} /> 当前可用额度</span>
           <strong>{remaining !== undefined ? `${remaining}%` : statusText(snapshot.credentialStatus)}</strong>
@@ -187,7 +270,7 @@ function DetailView() {
       {snapshot.error && <div className="soft-alert"><AlertCircle size={14} />{snapshot.error}</div>}
       <QuotaCard item={five} dark={dark} now={now} index={0} />
       <QuotaCard item={seven} dark={dark} now={now} index={1} />
-      <footer className="detail-actions">
+      <footer className="detail-actions" data-reveal>
         <div><UpdateBadge status={update} /><small>{snapshot.queriedAt ? `额度更新于 ${new Date(snapshot.queriedAt).toLocaleTimeString("zh-CN")}` : "尚未成功查询"}</small></div>
         <div><button className="soft-icon-button" title="刷新" onClick={refresh}><RefreshCw size={16} className={refreshing ? "spin" : ""} /></button>
           <button className="soft-icon-button accent" title="设置" onClick={() => invoke("show_settings")}><Settings2 size={16} /></button></div>
@@ -205,26 +288,31 @@ function radarColor(score?: number) {
   return "#ef6670";
 }
 
+function formatRadarCost(value?: number) {
+  if (value === undefined) return "--";
+  return `$${value >= 100 ? value.toFixed(0) : value.toFixed(1)}`;
+}
+
 function RadarView({ radar }: { radar: RadarSnapshot }) {
   const [refreshing, setRefreshing] = useState(false);
   const refresh = async () => { setRefreshing(true); try { await invoke("refresh_radar"); } finally { setRefreshing(false); } };
   return <div className="radar-panel">
-    <section className="soft-card radar-heading"><div><span className={`radar-live ${radar.status ?? ""}`} /><div><strong>模型能力雷达</strong><small>{radar.batch ?? "等待数据"} · Public</small></div></div>
+    <section className="soft-card radar-heading interactive-surface" data-reveal onMouseMove={trackPointer} onMouseLeave={resetPointer}><div><span className={`radar-live ${radar.status ?? ""}`} /><div><strong>模型能力雷达</strong><small>{radar.batch ?? "等待数据"} · Public</small></div></div>
       <button className="soft-icon-button" title="刷新 Radar" onClick={refresh}><RefreshCw size={15} className={refreshing ? "spin" : ""} /></button></section>
     {radar.error && <div className="soft-alert"><AlertCircle size={14} />{radar.error}{radar.cached ? "（显示缓存）" : ""}</div>}
-    {radar.signal && <div className="radar-signal"><RadioTower size={14} /><span>{radar.signal}</span></div>}
-    <div className="radar-model-grid">{radar.models.length ? radar.models.map((model) => <article className="soft-card radar-model" key={model.id} style={{ "--radar-color": radarColor(model.score) } as CSSProperties}>
+    {radar.signal && <div className="radar-signal" data-reveal><RadioTower size={14} /><span>{radar.signal}</span></div>}
+    <div className="radar-model-grid">{radar.models.length ? radar.models.map((model, index) => <article className="soft-card radar-model interactive-surface" data-reveal key={model.id} style={{ "--radar-color": radarColor(model.score), "--reveal-delay": `${index * 45}ms` } as CSSProperties} onMouseMove={trackPointer} onMouseLeave={resetPointer}>
       <strong className="radar-model-name">{model.label}</strong>
       <div className="radar-iq"><small>IQ 分数</small><strong>{model.score?.toFixed(1) ?? "--"}</strong></div>
       <div className="radar-community"><span>社区体感</span><strong>{model.communityScore?.toFixed(1) ?? "--"}</strong></div>
-      <small className="radar-votes">{model.communityVotes !== undefined ? `${model.communityVotes} 人评分` : "暂无评分"}</small>
+      <div className="radar-reference"><span><small>参考价格</small><strong>{formatRadarCost(model.costUsd)}</strong></span><span><small>参考时间</small><strong>{model.wallTime ?? "--"}</strong></span></div>
     </article>) : <div className="radar-empty">暂无模型评分，点击刷新重试</div>}</div>
-    <footer className="radar-footer"><span>{radar.attribution}</span><span>{radar.updatedAt ? new Date(radar.updatedAt).toLocaleString("zh-CN") : "尚未更新"}</span></footer>
+    <footer className="radar-footer" data-reveal><span>{radar.attribution}</span><span>{radar.updatedAt ? new Date(radar.updatedAt).toLocaleString("zh-CN") : "尚未更新"}</span></footer>
   </div>;
 }
 
 function Section({ icon, title, children }: { icon: ReactNode; title: string; children: ReactNode }) {
-  return <section className="soft-card settings-section"><h3><span>{icon}</span>{title}</h3>{children}</section>;
+  return <section className="soft-card settings-section interactive-surface" onMouseMove={trackPointer} onMouseLeave={resetPointer}><h3><span>{icon}</span>{title}</h3>{children}</section>;
 }
 
 function SettingsPanel({ value, onSaved }: { value: AppSettings; onSaved: (next: AppSettings) => void }) {
