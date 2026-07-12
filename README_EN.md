@@ -46,6 +46,14 @@ Installing a newer MSI upgrades an existing installation.
 
 ## Changelog
 
+### 0.8.0
+
+- Added scale, motion, opacity, and blur entrance animation every time the detail window opens, plus consistent animated exits.
+- Clicking outside, losing focus, or clicking the taskbar widget again now closes details after the exit animation.
+- Added pointer-tracked card glow, subtle 3D tilt, hover depth, and scroll-driven reveal animations.
+- Added a remembered sun/moon theme toggle to the detail window.
+- Added reference price and time to Radar cards, removed vote counts, and enlarged model names.
+
 ### 0.7.0
 
 - Reworked Radar card hierarchy to emphasize model name, IQ, community perception, then rating count.

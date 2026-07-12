@@ -35,6 +35,7 @@ pub struct RadarModel {
     pub valid_tasks: Option<i64>,
     pub invalid_tasks: Option<i64>,
     pub wall_time: Option<String>,
+    pub cost_usd: Option<f64>,
     pub community_score: Option<f64>,
     pub community_votes: Option<i64>,
 }
@@ -77,7 +78,7 @@ impl RadarService {
         crate::network::client(Duration::from_secs(12))?
             .get(url)
             .header("Accept", "application/json")
-            .header("User-Agent", "codex-quota-bar/0.6")
+            .header("User-Agent", "codex-quota-bar/0.8")
             .header("Cache-Control", "no-cache")
             .send()
             .await
@@ -105,6 +106,7 @@ fn parse_model(id: String, label: String, value: &Value) -> RadarModel {
             .or_else(|| value.get("invalid"))
             .and_then(Value::as_i64),
         wall_time: text(value, "wall_time_human"),
+        cost_usd: value.get("cost_usd").and_then(Value::as_f64),
         community_score: None,
         community_votes: None,
     }
@@ -284,12 +286,14 @@ mod tests {
         let value: Value = serde_json::from_str(r#"{
           "status":"community_confirmed","window":{"message":"等待下一轮"},
           "api_access":{"requirements":{"attribution_text":"数据来自 Codex 雷达 codexradar.com","site":"https://codexradar.com"}},
-          "model_iq":{"latest":{"date":"2026-07-11-pm","model":"gpt-5.6-sol","reasoning_effort":"max","score":135,"passed":9,"valid_tasks":10},
+          "model_iq":{"latest":{"date":"2026-07-11-pm","model":"gpt-5.6-sol","reasoning_effort":"max","score":135,"passed":9,"valid_tasks":10,"cost_usd":49.8,"wall_time_human":"3.4h"},
           "comparisons":{"future_model":{"label":"Future high","latest":{"score":105,"passed":7,"tasks":10}}},
           "quota_radar":{"date":"2026-07-11-pm","rows":[{"tier":"20x Pro","five_h":328.15,"seven_d":1968.9,"basis":"measured"}]}}
         }"#).unwrap();
         let snapshot = parse_summary(&value, 42).unwrap();
         assert_eq!(snapshot.models.len(), 2);
+        assert_eq!(snapshot.models[0].cost_usd, Some(49.8));
+        assert_eq!(snapshot.models[0].wall_time.as_deref(), Some("3.4h"));
         assert_eq!(snapshot.models[1].label, "Future high");
         assert_eq!(snapshot.quota_rows[0].five_hour, Some(328.15));
         assert_eq!(snapshot.fetched_at, Some(42));

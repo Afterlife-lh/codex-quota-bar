@@ -176,7 +176,8 @@ fn toggle_detail(app: AppHandle) -> Result<(), String> {
         .get_webview_window("detail")
         .ok_or_else(|| "detail window missing".to_string())?;
     if detail.is_visible().map_err(|error| error.to_string())? {
-        detail.hide().map_err(|error| error.to_string())
+        app.emit_to("detail", "request-detail-close", ())
+            .map_err(|error| error.to_string())
     } else {
         taskbar::show_detail(&app)
     }
@@ -184,14 +185,40 @@ fn toggle_detail(app: AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 fn show_menu(app: AppHandle) -> Result<(), String> {
-    let _ = app.get_webview_window("detail").map(|w| w.hide());
-    taskbar::show_menu(&app)
+    let detail_visible = app
+        .get_webview_window("detail")
+        .and_then(|window| window.is_visible().ok())
+        .unwrap_or(false);
+    if detail_visible {
+        let _ = app.emit_to("detail", "request-detail-close", ());
+        let delayed = app.clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(210)).await;
+            let _ = taskbar::show_menu(&delayed);
+        });
+        Ok(())
+    } else {
+        taskbar::show_menu(&app)
+    }
 }
 
 #[tauri::command]
 fn show_settings(app: AppHandle) -> Result<(), String> {
-    let _ = app.get_webview_window("detail").map(|window| window.hide());
-    taskbar::show_settings(&app)
+    let detail_visible = app
+        .get_webview_window("detail")
+        .and_then(|window| window.is_visible().ok())
+        .unwrap_or(false);
+    if detail_visible {
+        let _ = app.emit_to("detail", "request-detail-close", ());
+        let delayed = app.clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(210)).await;
+            let _ = taskbar::show_settings(&delayed);
+        });
+        Ok(())
+    } else {
+        taskbar::show_settings(&app)
+    }
 }
 
 #[tauri::command]
