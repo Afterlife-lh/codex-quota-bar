@@ -1,5 +1,5 @@
 use crate::settings::{AppSettings, TaskbarSide};
-use tauri::{AppHandle, Manager, PhysicalPosition, PhysicalSize, Position, Size};
+use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, Position, Size};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Rect {
@@ -627,10 +627,15 @@ pub fn show_detail(app: &AppHandle) -> Result<(), String> {
     detail
         .set_position(Position::Physical(PhysicalPosition::new(x, y.max(8))))
         .map_err(|e| e.to_string())?;
-    detail
-        .show()
-        .and_then(|_| detail.set_focus())
-        .map_err(|e| e.to_string())
+    app.emit_to("detail", "prepare-detail-show", ())
+        .map_err(|e| e.to_string())?;
+    let detail_for_show = detail.clone();
+    tauri::async_runtime::spawn(async move {
+        // Let the hidden WebView apply its entering state before Windows paints it.
+        tokio::time::sleep(std::time::Duration::from_millis(34)).await;
+        let _ = detail_for_show.show().and_then(|_| detail_for_show.set_focus());
+    });
+    Ok(())
 }
 
 pub fn show_settings(app: &AppHandle) -> Result<(), String> {

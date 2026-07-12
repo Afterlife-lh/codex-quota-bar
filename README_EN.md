@@ -54,6 +54,13 @@ Installing a newer MSI upgrades an existing installation.
 
 ## Changelog
 
+### 0.9.0
+
+- Fixed the fully rendered detail page flashing before its entrance animation begins.
+- Made model-card pointer tracking substantially more responsive.
+- The theme button now shows the sun or moon for the active theme and switches through a button-originated ripple animation.
+- The updater now waits for MSI completion and automatically relaunches after confirming the new executable exists.
+
 ### 0.8.0
 
 - Added scale, motion, opacity, and blur entrance animation every time the detail window opens, plus consistent animated exits.

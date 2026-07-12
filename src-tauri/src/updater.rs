@@ -138,7 +138,7 @@ pub fn launch_installer(path: &std::path::Path) -> Result<(), String> {
     let msi = powershell_literal(&windows_command_path(path));
     let executable = powershell_literal(&windows_command_path(&current_exe));
     let script = format!(
-        "$msi='{msi}';$exe='{executable}';Start-Sleep -Seconds 2;& msiexec.exe /i $msi /passive /norestart;$code=$LASTEXITCODE;if($code -eq 0 -or $code -eq 3010){{Remove-Item -LiteralPath $msi -Force -ErrorAction SilentlyContinue}};Start-Process -FilePath $exe"
+        "$msi='{msi}';$exe='{executable}';Start-Sleep -Seconds 2;$p=Start-Process -FilePath msiexec.exe -ArgumentList @('/i',$msi,'/passive','/norestart') -Wait -PassThru;$code=$p.ExitCode;if($code -eq 0 -or $code -eq 3010){{Remove-Item -LiteralPath $msi -Force -ErrorAction SilentlyContinue;for($i=0;$i -lt 20;$i++){{if(Test-Path -LiteralPath $exe){{Start-Process -FilePath $exe;exit 0}};Start-Sleep -Milliseconds 500}}}};exit $code"
     );
     Command::new("powershell.exe")
         .args([
