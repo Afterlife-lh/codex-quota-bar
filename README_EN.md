@@ -12,6 +12,14 @@ beside the notification area.
 
 ![Codex Quota Bar taskbar preview](QC_35dc4aadd8c7f218.png)
 
+## Interface Preview
+
+| Codex Radar | Quota details |
+| --- | --- |
+| ![Codex Radar model intelligence view](QC_700b3d87b3644f8d.png) | ![Codex quota details view](QC_91f67c0ea8e32e77.png) |
+
+> The interface continues to evolve; current releases may refine the layout and displayed data.
+
 ## Features
 
 - Transparent two-line taskbar widget with nested 5h/7d quota rings.

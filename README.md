@@ -12,6 +12,14 @@ ChatGPT 登录状态，并在 Windows 任务栏通知区域旁显示当前账户
 
 ![Codex Quota Bar 任务栏展示](QC_35dc4aadd8c7f218.png)
 
+## 界面展示
+
+| Codex Radar | 额度详情 |
+| --- | --- |
+| ![Codex Radar 模型能力界面](QC_700b3d87b3644f8d.png) | ![Codex 额度详情界面](QC_91f67c0ea8e32e77.png) |
+
+> 界面会随版本持续优化，实际布局和数据以当前版本为准。
+
 ## 功能特性
 
 - 透明双行任务栏组件，使用双同心环显示 5h/7d 剩余额度。
