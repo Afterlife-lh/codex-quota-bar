@@ -192,6 +192,7 @@ function DetailView() {
   const [refreshing, setRefreshing] = useState(false);
   const [windowCycle, setWindowCycle] = useState(0);
   const [windowPhase, setWindowPhase] = useState<"entering" | "visible" | "leaving">("entering");
+  const [themeRipple, setThemeRipple] = useState<{ x: number; y: number; target: "light" | "dark" } | null>(null);
   const closeTimer = useRef<number>();
   const closing = useRef(false);
   const hasFocused = useRef(false);
@@ -212,22 +213,28 @@ function DetailView() {
   }, []);
   useEffect(() => {
     const current = getCurrentWindow();
+    const beginEntry = () => {
+      hasFocused.current = true;
+      closing.current = false;
+      window.clearTimeout(closeTimer.current);
+      setWindowCycle((value) => value + 1);
+      setWindowPhase("entering");
+      window.setTimeout(() => setWindowPhase("visible"), 360);
+    };
     const focusListener = current.onFocusChanged(({ payload }) => {
       if (payload) {
-        hasFocused.current = true;
-        closing.current = false;
-        window.clearTimeout(closeTimer.current);
-        setWindowCycle((value) => value + 1);
-        setWindowPhase("entering");
-        window.setTimeout(() => setWindowPhase("visible"), 360);
+        if (!hasFocused.current) beginEntry();
       } else if (hasFocused.current) {
+        hasFocused.current = false;
         closeAnimated();
       }
     });
+    const prepareListener = listen("prepare-detail-show", beginEntry);
     const closeListener = listen("request-detail-close", closeAnimated);
     return () => {
       window.clearTimeout(closeTimer.current);
       void focusListener.then((unlisten) => unlisten());
+      void prepareListener.then((unlisten) => unlisten());
       void closeListener.then((unlisten) => unlisten());
     };
   }, [closeAnimated]);
@@ -248,15 +255,21 @@ function DetailView() {
     elements.forEach((element) => observer.observe(element));
     return () => observer.disconnect();
   }, [detailTab, radar.models.length, snapshot.windows.length, windowCycle]);
-  const toggleTheme = () => {
+  const toggleTheme = (event: MouseEvent<HTMLButtonElement>) => {
     const next = dark ? "light" : "dark";
-    window.localStorage.setItem("detail-theme", next);
-    setThemeOverride(next);
+    const shell = event.currentTarget.closest(".soft-shell")?.getBoundingClientRect();
+    setThemeRipple({ x: event.clientX - (shell?.left ?? 0), y: event.clientY - (shell?.top ?? 0), target: next });
+    window.setTimeout(() => {
+      window.localStorage.setItem("detail-theme", next);
+      setThemeOverride(next);
+      window.setTimeout(() => setThemeRipple(null), 90);
+    }, 480);
   };
   return <main key={windowCycle} className={`soft-shell detail-panel window-${windowPhase}`} data-theme={dark ? "dark" : "light"}>
+    {themeRipple && <span className={`theme-ripple theme-ripple-${themeRipple.target}`} style={{ left: themeRipple.x, top: themeRipple.y }} />}
     <span className="ambient-orb orb-one" /><span className="ambient-orb orb-two" />
     <WindowHeader title="Codex Quota Bar" subtitle="额度中心" icon={<Sparkles size={15} />} onClose={closeAnimated}
-      actions={<button className="soft-icon-button theme-button" aria-label={dark ? "切换为亮色主题" : "切换为暗色主题"} title={dark ? "切换为亮色主题" : "切换为暗色主题"} onClick={toggleTheme}>{dark ? <Sun size={16} /> : <Moon size={16} />}</button>} />
+      actions={<button className="soft-icon-button theme-button" aria-label={dark ? "切换为亮色主题" : "切换为暗色主题"} title={dark ? "切换为亮色主题" : "切换为暗色主题"} onClick={toggleTheme}>{dark ? <Moon size={16} /> : <Sun size={16} />}</button>} />
     <nav className="detail-tabs"><button className={detailTab === "quota" ? "is-active" : ""} onClick={() => setDetailTab("quota")}><Gauge size={13} />额度</button>
       {settings?.radarEnabled !== false && <button className={detailTab === "radar" ? "is-active" : ""} onClick={() => setDetailTab("radar")}><RadioTower size={13} />Codex Radar</button>}</nav>
     <div className="soft-scroll detail-content">
