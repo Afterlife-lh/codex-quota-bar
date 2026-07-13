@@ -179,7 +179,10 @@ mod platform {
         }
         Some(super::TaskbarGeometry {
             taskbar: rect(taskbar)?,
-            tray: (!tray.is_null()).then(|| rect(tray)).flatten(),
+            tray: (!tray.is_null())
+                .then(|| rect(tray))
+                .flatten()
+                .filter(|candidate| candidate.width() > 0 && candidate.height() > 0),
             task_buttons,
             windows_11: is_windows_11(),
         })
@@ -466,21 +469,19 @@ fn widget_target(
         let min_x = aligned_x(region_start, region_end, width, gap, TaskbarSide::Left);
         let max_x = aligned_x(region_start, region_end, width, gap, TaskbarSide::Right);
         let mut widget_x = aligned_x(region_start, region_end, width, gap, alignment);
-        if settings.coordinate_lyricify {
-            if let Some(lyricify) = lyricify {
-                if region == TaskbarSide::Left && alignment == TaskbarSide::Left {
-                    let lyricify_x = min_x;
-                    widget_x = (lyricify_x + lyricify.rect.width() + gap).min(max_x);
-                    let lyricify_y = taskbar.top + (taskbar.height() - lyricify.rect.height()) / 2;
-                    if move_lyricify {
-                        platform::move_window(lyricify, lyricify_x, lyricify_y);
-                    }
-                } else {
-                    let lyricify_x = widget_x - lyricify.rect.width() - gap;
-                    let lyricify_y = taskbar.top + (taskbar.height() - lyricify.rect.height()) / 2;
-                    if move_lyricify {
-                        platform::move_window(lyricify, lyricify_x, lyricify_y);
-                    }
+        if let Some(lyricify) = lyricify {
+            if region == TaskbarSide::Left && alignment == TaskbarSide::Left {
+                let lyricify_x = min_x;
+                widget_x = (lyricify_x + lyricify.rect.width() + gap).min(max_x);
+                let lyricify_y = taskbar.top + (taskbar.height() - lyricify.rect.height()) / 2;
+                if move_lyricify {
+                    platform::move_window(lyricify, lyricify_x, lyricify_y);
+                }
+            } else {
+                let lyricify_x = widget_x - lyricify.rect.width() - gap;
+                let lyricify_y = taskbar.top + (taskbar.height() - lyricify.rect.height()) / 2;
+                if move_lyricify {
+                    platform::move_window(lyricify, lyricify_x, lyricify_y);
                 }
             }
         }
@@ -596,6 +597,12 @@ pub fn position_widget(app: &AppHandle, settings: &AppSettings) -> Result<(), St
 }
 
 pub fn show_widget(app: &AppHandle, settings: &AppSettings) -> Result<(), String> {
+    // Explorer lays out TrayNotifyWnd asynchronously during sign-in. Keep the
+    // widget hidden until that real boundary exists instead of flashing at an
+    // estimated position; the 60 Hz reposition loop will reveal it precisely.
+    if platform::geometry().is_none_or(|geometry| geometry.tray.is_none()) {
+        return Ok(());
+    }
     position_widget(app, settings)?;
     let window = app
         .get_webview_window("taskbar")
@@ -633,7 +640,9 @@ pub fn show_detail(app: &AppHandle) -> Result<(), String> {
     tauri::async_runtime::spawn(async move {
         // Let the hidden WebView apply its entering state before Windows paints it.
         tokio::time::sleep(std::time::Duration::from_millis(34)).await;
-        let _ = detail_for_show.show().and_then(|_| detail_for_show.set_focus());
+        let _ = detail_for_show
+            .show()
+            .and_then(|_| detail_for_show.set_focus());
     });
     Ok(())
 }
@@ -744,13 +753,9 @@ pub fn spawn_reposition_loop(app: AppHandle, state: std::sync::Arc<crate::AppSta
             let coordinate_lyricify =
                 now.duration_since(last_lyricify_scan) >= std::time::Duration::from_millis(500);
             if coordinate_lyricify {
-                lyricify = if settings.coordinate_lyricify {
-                    platform::geometry()
-                        .map(|geometry| geometry.taskbar)
-                        .and_then(platform::lyricify_window)
-                } else {
-                    None
-                };
+                lyricify = platform::geometry()
+                    .map(|geometry| geometry.taskbar)
+                    .and_then(platform::lyricify_window);
                 last_lyricify_scan = now;
             }
 
