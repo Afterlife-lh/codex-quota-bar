@@ -38,7 +38,7 @@ export interface AppSettings {
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
-  displayWidth: 218,
+  displayWidth: 140,
   displayHeight: 42,
   horizontalOffset: 0,
   verticalOffset: 0,
@@ -52,7 +52,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   taskbarRegion: "right",
   windowAlignment: "right",
   reverseLayout: false,
-  autoUpdate: true,
+  autoUpdate: false,
   radarEnabled: true,
 };
 

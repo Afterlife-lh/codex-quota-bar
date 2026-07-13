@@ -453,9 +453,8 @@ fn spawn_update_background(app: AppHandle, state: Arc<AppState>) {
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_secs(12)).await;
         loop {
-            if state.settings.read().await.auto_update {
-                let _ = run_update_check(&app, &state, true).await;
-            }
+            let auto_install = state.settings.read().await.auto_update;
+            let _ = run_update_check(&app, &state, auto_install).await;
             tokio::time::sleep(std::time::Duration::from_secs(6 * 60 * 60)).await;
         }
     });

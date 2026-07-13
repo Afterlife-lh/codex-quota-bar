@@ -112,8 +112,9 @@ function DualRing({ five, seven, size = 28, stroke = 2.3, dark, animated = true 
   const neutral = dark ? "#8b929c" : "#737982";
   return <svg className="dual-ring" width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden="true">
     <g transform={`rotate(-90 ${center} ${center})`}>
-      {circle(outerR, seven?.remainingPercent ?? 0, seven ? quotaColor(seven.remainingPercent, dark) : neutral, "outer")}
-      {circle(innerR, five?.remainingPercent ?? 0, five ? quotaColor(five.remainingPercent, dark) : neutral, "inner")}
+      {seven && circle(outerR, seven.remainingPercent, quotaColor(seven.remainingPercent, dark), "outer")}
+      {five && circle(seven ? innerR : outerR, five.remainingPercent, quotaColor(five.remainingPercent, dark), "inner")}
+      {!five && !seven && circle(outerR, 0, neutral, "outer")}
     </g>
   </svg>;
 }
@@ -128,6 +129,7 @@ function QuotaRow({ window, label, now, dark, showCountdown = true }: { window?:
 
 function TaskbarView() {
   const { snapshot, now } = useQuota();
+  const update = useUpdateStatus();
   const settings = useSettings();
   const dark = useDarkTheme(settings?.followSystemTheme ?? true);
   const five = findWindow(snapshot.windows, "five_hour");
@@ -140,14 +142,15 @@ function TaskbarView() {
       "--taskbar-foreground": dark ? "#F2F5FC" : "#202631",
     } as CSSProperties}
     onClick={toggleDetails} onContextMenu={openMenu}>
-    <DualRing five={five} seven={seven} size={settings?.ringSize ?? 28} dark={dark} animated={settings?.animations ?? true} />
-    <div className="quota-rows">
-      {snapshot.windows.length ? <>
-        <QuotaRow window={five} label="5h" now={now} dark={dark} showCountdown={settings?.showCountdown ?? true} />
-        <QuotaRow window={seven} label={seven?.kind === "thirty_day" ? "30d" : "7d"} now={now} dark={dark} showCountdown={settings?.showCountdown ?? true} />
+    {(five || seven) && <DualRing five={five} seven={seven} size={settings?.ringSize ?? 28} dark={dark} animated={settings?.animations ?? true} />}
+    <div className={`quota-rows ${[five, seven].filter(Boolean).length === 1 ? "is-single" : ""}`}>
+      {five || seven ? <>
+        {five && <QuotaRow window={five} label="5h" now={now} dark={dark} showCountdown={settings?.showCountdown ?? true} />}
+        {seven && <QuotaRow window={seven} label={seven.kind === "thirty_day" ? "30d" : "7d"} now={now} dark={dark} showCountdown={settings?.showCountdown ?? true} />}
       </> : <div className="empty-state">{statusText(snapshot.credentialStatus)}</div>}
     </div>
     {snapshot.cached && <span className="stale-dot" title="显示的是上次成功数据" />}
+    {update.state === "available" && <span className="update-dot" title={`发现新版本 ${update.availableVersion ?? ""}`} />}
   </main>;
 }
 
@@ -158,9 +161,9 @@ function WindowHeader({ title, subtitle, icon, actions, onClose }: { title: stri
   </header>;
 }
 
-function QuotaCard({ item, dark, now, index }: { item?: QuotaWindow; dark: boolean; now: number; index: number }) {
+function QuotaCard({ item, dark, now }: { item: QuotaWindow; dark: boolean; now: number }) {
   const color = item ? quotaColor(item.remainingPercent, dark) : "#8a9099";
-  return <section className="soft-card quota-card interactive-surface" data-reveal style={{ "--delay": `${100 + index * 80}ms`, "--reveal-delay": `${index * 70}ms` } as CSSProperties} onMouseMove={trackPointer} onMouseLeave={resetPointer}>
+  return <section className="soft-card quota-card interactive-surface" data-reveal onMouseMove={trackPointer} onMouseLeave={resetPointer}>
     <div className="card-top"><span><Gauge size={15} />{item?.label ?? "额度窗口"}</span><strong style={{ color }}>{item ? `${Math.round(item.remainingPercent)}%` : "--"}</strong></div>
     <div className="soft-progress"><span style={{ width: `${item?.remainingPercent ?? 0}%`, background: color }} /></div>
     <div className="card-meta"><span>已使用 {item ? `${Math.round(item.usedPercent)}%` : "--"}</span><span><Clock3 size={12} /> {formatCountdown(item?.resetAt, false, now)}</span></div>
@@ -175,6 +178,18 @@ function UpdateBadge({ status }: { status: UpdateStatus }) {
     {error ? <AlertCircle size={12} /> : busy ? <RefreshCw size={12} className="spin" /> : <ShieldCheck size={12} />}
     {status.state === "available" ? `发现 ${status.availableVersion}` : status.message ?? `v${status.currentVersion}`}
   </span>;
+}
+
+function UpdatePanel({ status, onRefresh, refreshing }: { status: UpdateStatus; onRefresh: () => void; refreshing: boolean }) {
+  if (status.state !== "available") return null;
+  return <section className="soft-card update-panel" data-reveal>
+    <div><span className="eyebrow"><Download size={13} /> 可用更新</span><strong>Codex Quota Bar {status.availableVersion}</strong></div>
+    {status.message && <p>{status.message}</p>}
+    <div className="update-panel-actions">
+      <button className="soft-button" onClick={onRefresh} disabled={refreshing}><RefreshCw size={14} className={refreshing ? "spin" : ""} />重新检查</button>
+      <button className="soft-button accent" onClick={() => invoke("install_update")}><Download size={14} />安装更新</button>
+    </div>
+  </section>;
 }
 
 function DetailView() {
@@ -198,8 +213,9 @@ function DetailView() {
   const hasFocused = useRef(false);
   const five = findWindow(snapshot.windows, "five_hour");
   const seven = findWindow(snapshot.windows, "seven_day") ?? findWindow(snapshot.windows, "thirty_day");
-  const remaining = snapshot.windows.length ? Math.round(Math.min(five?.remainingPercent ?? 100, seven?.remainingPercent ?? 100)) : undefined;
-  const refresh = async () => { setRefreshing(true); try { await invoke("refresh_now"); } finally { setRefreshing(false); } };
+  const visibleWindows = [five, seven].filter((item): item is QuotaWindow => Boolean(item));
+  const remaining = visibleWindows.length ? Math.round(Math.min(...visibleWindows.map((item) => item.remainingPercent))) : undefined;
+  const refresh = async () => { setRefreshing(true); try { await Promise.all([invoke("refresh_now"), invoke("check_for_updates")]); } finally { setRefreshing(false); } };
   const closeAnimated = useCallback(() => {
     if (closing.current) return;
     closing.current = true;
@@ -254,7 +270,7 @@ function DetailView() {
     }), { root, threshold: 0.14 });
     elements.forEach((element) => observer.observe(element));
     return () => observer.disconnect();
-  }, [detailTab, radar.models.length, snapshot.windows.length, windowCycle]);
+  }, [detailTab, radar.models.length, snapshot.windows.length, update.state, windowCycle]);
   const toggleTheme = (event: MouseEvent<HTMLButtonElement>) => {
     const next = dark ? "light" : "dark";
     const shell = event.currentTarget.closest(".soft-shell")?.getBoundingClientRect();
@@ -262,8 +278,8 @@ function DetailView() {
     window.setTimeout(() => {
       window.localStorage.setItem("detail-theme", next);
       setThemeOverride(next);
-      window.setTimeout(() => setThemeRipple(null), 90);
-    }, 480);
+      window.setTimeout(() => setThemeRipple(null), 80);
+    }, 300);
   };
   return <main key={windowCycle} className={`soft-shell detail-panel window-${windowPhase}`} data-theme={dark ? "dark" : "light"}>
     {themeRipple && <span className={`theme-ripple theme-ripple-${themeRipple.target}`} style={{ left: themeRipple.x, top: themeRipple.y }} />}
@@ -281,14 +297,15 @@ function DetailView() {
           <small><span className="live-dot" />{snapshot.cached ? "显示上次成功数据" : "每分钟自动同步"}</small></div>
       </section>
       {snapshot.error && <div className="soft-alert"><AlertCircle size={14} />{snapshot.error}</div>}
-      <QuotaCard item={five} dark={dark} now={now} index={0} />
-      <QuotaCard item={seven} dark={dark} now={now} index={1} />
+      {five ? <QuotaCard item={five} dark={dark} now={now} /> : <div className="quota-unavailable" data-reveal>当前账户没有 5 小时限额</div>}
+      {seven ? <QuotaCard item={seven} dark={dark} now={now} /> : <div className="quota-unavailable" data-reveal>当前账户没有 7 天限额</div>}
       <footer className="detail-actions" data-reveal>
         <div><UpdateBadge status={update} /><small>{snapshot.queriedAt ? `额度更新于 ${new Date(snapshot.queriedAt).toLocaleTimeString("zh-CN")}` : "尚未成功查询"}</small></div>
         <div><button className="soft-icon-button" title="刷新" onClick={refresh}><RefreshCw size={16} className={refreshing ? "spin" : ""} /></button>
           <button className="soft-icon-button accent" title="设置" onClick={() => invoke("show_settings")}><Settings2 size={16} /></button></div>
       </footer>
       </>}
+      <UpdatePanel status={update} onRefresh={refresh} refreshing={refreshing} />
     </div>
   </main>;
 }
@@ -314,7 +331,7 @@ function RadarView({ radar }: { radar: RadarSnapshot }) {
       <button className="soft-icon-button" title="刷新 Radar" onClick={refresh}><RefreshCw size={15} className={refreshing ? "spin" : ""} /></button></section>
     {radar.error && <div className="soft-alert"><AlertCircle size={14} />{radar.error}{radar.cached ? "（显示缓存）" : ""}</div>}
     {radar.signal && <div className="radar-signal" data-reveal><RadioTower size={14} /><span>{radar.signal}</span></div>}
-    <div className="radar-model-grid">{radar.models.length ? radar.models.map((model, index) => <article className="soft-card radar-model interactive-surface" data-reveal key={model.id} style={{ "--radar-color": radarColor(model.score), "--reveal-delay": `${index * 45}ms` } as CSSProperties} onMouseMove={trackPointer} onMouseLeave={resetPointer}>
+    <div className="radar-model-grid">{radar.models.length ? radar.models.map((model) => <article className="soft-card radar-model interactive-surface" data-reveal key={model.id} style={{ "--radar-color": radarColor(model.score) } as CSSProperties} onMouseMove={trackPointer} onMouseLeave={resetPointer}>
       <strong className="radar-model-name">{model.label}</strong>
       <div className="radar-iq"><small>IQ 分数</small><strong>{model.score?.toFixed(1) ?? "--"}</strong></div>
       <div className="radar-community"><span>社区体感</span><strong>{model.communityScore?.toFixed(1) ?? "--"}</strong></div>
@@ -374,13 +391,12 @@ function SettingsPanel({ value, onSaved }: { value: AppSettings; onSaved: (next:
       <ToggleSetting label="显示重置倒计时" checked={draft.showCountdown} onChange={(showCountdown) => setDraft({ ...draft, showCountdown })} />
       <ToggleSetting label="平滑动画" checked={draft.animations} onChange={(animations) => setDraft({ ...draft, animations })} />
       <ToggleSetting label="跟随系统主题" checked={draft.followSystemTheme} onChange={(followSystemTheme) => setDraft({ ...draft, followSystemTheme })} />
-      <ToggleSetting label="自动避让 Lyricify Lite" checked={draft.coordinateLyricify} onChange={(coordinateLyricify) => setDraft({ ...draft, coordinateLyricify })} />
       <ToggleSetting label="反转环形－额度－倒计时" checked={draft.reverseLayout} onChange={(reverseLayout) => setDraft({ ...draft, reverseLayout })} />
       <ToggleSetting label="随 Windows 登录启动" checked={draft.autostart} onChange={(autostart) => setDraft({ ...draft, autostart })} />
       <ToggleSetting label="启用 Codex Radar" checked={draft.radarEnabled} onChange={(radarEnabled) => setDraft({ ...draft, radarEnabled })} />
     </Section>
     <Section icon={<Download size={15} />} title="软件更新">
-      <div className="update-row"><div><strong>自动更新</strong><small>从 Afterlife-lh/codex-quota-bar 获取正式版本</small></div><Toggle checked={draft.autoUpdate} onChange={(autoUpdate) => setDraft({ ...draft, autoUpdate })} /></div>
+      <div className="update-row"><div><strong>自动安装更新</strong><small>关闭时仍检查版本，但只在手动确认后安装</small></div><Toggle checked={draft.autoUpdate} onChange={(autoUpdate) => setDraft({ ...draft, autoUpdate })} /></div>
       <div className="update-actions"><UpdateBadge status={update} />
         {update.state === "available" ? <button className="soft-button accent" onClick={installUpdate}><Download size={14} />安装并重启</button>
           : <button className="soft-button" disabled={["checking", "downloading", "installing"].includes(update.state)} onClick={checkUpdate}><RefreshCw size={14} />检查更新</button>}</div>

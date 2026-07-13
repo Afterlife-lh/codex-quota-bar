@@ -38,7 +38,7 @@ impl Default for AppSettings {
     fn default() -> Self {
         Self {
             codex_home: None,
-            display_width: 218.0,
+            display_width: 140.0,
             display_height: 42.0,
             horizontal_offset: 0.0,
             vertical_offset: 0.0,
@@ -52,7 +52,7 @@ impl Default for AppSettings {
             taskbar_region: TaskbarSide::Right,
             window_alignment: TaskbarSide::Right,
             reverse_layout: false,
-            auto_update: true,
+            auto_update: false,
             radar_enabled: true,
         }
     }
@@ -123,7 +123,7 @@ mod tests {
         assert_eq!(parsed.taskbar_region, TaskbarSide::Right);
         assert_eq!(parsed.window_alignment, TaskbarSide::Right);
         assert!(!parsed.reverse_layout);
-        assert!(parsed.auto_update);
+        assert!(!parsed.auto_update);
         assert!(parsed.radar_enabled);
     }
 }

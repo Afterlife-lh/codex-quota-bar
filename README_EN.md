@@ -54,6 +54,15 @@ Installing a newer MSI upgrades an existing installation.
 
 ## Changelog
 
+### 0.10.0
+
+- Automatic update installation is disabled by default; available releases now show an amber taskbar dot and an animated detail-page update panel with release notes and install action.
+- Detail refresh now checks quota and available updates together.
+- Unified entrance timing and motion for quota and Radar model cards.
+- Reworked theme ripple layering so it no longer covers text and renders more smoothly.
+- Quota rows and cards now adapt to missing 5h or 7d windows returned by the service.
+- Lyricify Lite coordination is always enabled, initial placement waits for the real tray boundary, and the default widget width is now 140px.
+
 ### 0.9.0
 
 - Fixed the fully rendered detail page flashing before its entrance animation begins.
