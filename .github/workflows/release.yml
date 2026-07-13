@@ -29,8 +29,20 @@ jobs:
         run: cargo test --manifest-path src-tauri/Cargo.toml
       - name: Build MSI packages
         run: pnpm build
+      - name: Create curated release notes
+        shell: pwsh
+        run: |
+          $lines = Get-Content README.md -Encoding utf8
+          $headings = @(0..($lines.Count - 1) | Where-Object { $lines[$_] -match '^### ' })
+          if ($headings.Count -lt 1) { throw 'No changelog section found in README.md' }
+          $start = $headings[0]
+          $end = if ($headings.Count -gt 1) { $headings[1] - 1 } else { $lines.Count - 1 }
+          $version = $lines[$start] -replace '^###\s*', ''
+          $changes = @($lines[($start + 1)..$end] | ForEach-Object { $_ -replace '^-\s+', '' } | Where-Object { $_.Trim() })
+          $notes = (@("v**$version**", "") + $changes -join "`n").Trim()
+          Set-Content -LiteralPath release-notes.md -Value $notes -Encoding utf8
       - name: Publish release assets
         uses: softprops/action-gh-release@v2
         with:
-          generate_release_notes: true
+          body_path: release-notes.md
           files: src-tauri/target/release/bundle/msi/*.msi

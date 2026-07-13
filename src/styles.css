@@ -107,6 +107,7 @@ html[data-detail-theme="dark"]::view-transition-old(root) { z-index: 2147483646;
 html[data-detail-theme="dark"]::view-transition-new(root) { z-index: 1; }
 .soft-icon-button { width: 34px; height: 34px; display: inline-grid; place-items: center; border: 0; border-radius: 12px; color: var(--muted); cursor: pointer; background: linear-gradient(145deg, var(--surface-2), var(--surface)); box-shadow: 5px 5px 11px var(--shadow-dark), -5px -5px 11px var(--shadow-light); transition: transform 160ms ease, color 160ms ease, box-shadow 160ms ease; }
 .soft-icon-button:hover { color: var(--accent); transform: translateY(-1px); }
+.soft-icon-button:disabled { pointer-events: none; opacity: .72; }
 .soft-icon-button:active { transform: translateY(1px) scale(.97); box-shadow: inset 4px 4px 8px var(--shadow-dark), inset -4px -4px 8px var(--shadow-light); }
 .soft-icon-button.accent { color: white; background: linear-gradient(145deg, var(--accent), var(--accent-2)); box-shadow: 5px 6px 13px color-mix(in srgb, var(--accent) 35%, transparent), -4px -4px 9px var(--shadow-light); }
 .hero-card { min-height: 135px; margin: 2px 0 15px; padding: 18px 20px; display: flex; align-items: center; gap: 25px; }
@@ -138,9 +139,9 @@ html[data-detail-theme="dark"]::view-transition-new(root) { z-index: 1; }
 .update-badge.is-error { color: var(--danger); }
 .update-panel { margin: 12px 0 3px; padding: 13px 14px; animation: update-panel-in 300ms cubic-bezier(.2,.8,.2,1) both; }
 .update-panel > div:first-child { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.update-panel > div:first-child > strong { color: var(--accent); font-size: 12px; }
-.update-panel p { max-height: 78px; margin: 9px 0; overflow: auto; color: var(--muted); font-size: 10px; line-height: 15px; white-space: pre-wrap; }
-.update-panel time { display: block; margin: -4px 0 9px; color: var(--muted); font-size: 9px; }
+.update-panel > div:first-child > strong { color: var(--accent); font-size: 13px; }
+.update-panel p { max-height: 108px; margin: 10px 0; overflow: auto; color: var(--muted); font-size: 12px; line-height: 18px; white-space: pre-wrap; }
+.update-panel time { display: block; margin: -4px 0 10px; color: var(--muted); font-size: 10.5px; }
 .update-panel-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .install-update-button { animation: install-button-in 260ms cubic-bezier(.2,.8,.2,1) both; }
 
@@ -156,10 +157,10 @@ html[data-detail-theme="dark"]::view-transition-new(root) { z-index: 1; }
 .radar-live.red, .radar-live.error { background: var(--danger); }
 .radar-signal { min-height: 38px; margin-bottom: 12px; padding: 8px 11px; border-radius: 12px; display: flex; align-items: center; gap: 8px; color: var(--muted); background: var(--surface-deep); box-shadow: inset 3px 3px 7px var(--shadow-dark), inset -3px -3px 7px var(--shadow-light); font-size: 10px; }
 .radar-signal span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.radar-reset-signals { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
-.radar-reset-signals > div { min-width: 0; padding: 9px 10px; border-radius: 12px; background: var(--surface-deep); box-shadow: inset 3px 3px 7px var(--shadow-dark), inset -3px -3px 7px var(--shadow-light); }
-.radar-reset-signals span { display: block; margin-bottom: 3px; color: var(--muted); font-size: 8px; }
-.radar-reset-signals strong { display: block; color: var(--text); font-size: 10px; line-height: 14px; }
+.radar-reset-signals { display: grid; grid-template-columns: 1fr; gap: 8px; margin-bottom: 12px; }
+.radar-reset-signals > div { min-width: 0; padding: 10px 12px; border-radius: 12px; background: var(--surface-deep); box-shadow: inset 3px 3px 7px var(--shadow-dark), inset -3px -3px 7px var(--shadow-light); }
+.radar-reset-signals span { display: block; margin-bottom: 4px; color: var(--muted); font-size: 11px; font-weight: 700; }
+.radar-reset-signals strong { display: block; color: var(--text); font-size: 13px; line-height: 18px; }
 .radar-model-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(105px, 1fr)); gap: 9px; margin-bottom: 12px; }
 .radar-model { min-height: 164px; padding: 12px 10px 10px; display: flex; flex-direction: column; overflow: hidden; border-top: 3px solid var(--radar-color); }
 .radar-model-name { min-height: 34px; overflow: hidden; color: var(--text); font-size: 12.5px; font-weight: 740; line-height: 16px; }
