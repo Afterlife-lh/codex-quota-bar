@@ -54,6 +54,12 @@ Installing a newer MSI upgrades an existing installation.
 
 ## Changelog
 
+### 0.11.0
+
+- Rebuilt theme switching with the View Transitions API and an Element Plus-style circular reveal/conceal originating from the theme button.
+- The release panel is now persistent and shows the current version, release date, and changelog when no update is available.
+- Radar now reads the live banked-reset and hard-reset judgement headlines from the official Radar page, with the legacy signal retained as a fallback.
+
 ### 0.10.0
 
 - Automatic update installation is disabled by default; available releases now show an amber taskbar dot and an animated detail-page update panel with release notes and install action.

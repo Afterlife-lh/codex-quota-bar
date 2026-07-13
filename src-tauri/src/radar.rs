@@ -5,6 +5,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const PUBLIC_RADAR_URL: &str = "https://codexradar.com/current.json";
 const PUBLIC_RATINGS_URL: &str = "https://codexradar.com/api/model-ratings";
+const PUBLIC_RADAR_PAGE_URL: &str = "https://codexradar.com/";
 
 #[derive(Debug, Clone, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -13,6 +14,7 @@ pub struct RadarSnapshot {
     pub quota_rows: Vec<RadarQuotaRow>,
     pub status: Option<String>,
     pub signal: Option<String>,
+    pub reset_signals: Vec<RadarResetSignal>,
     pub batch: Option<String>,
     pub quota_batch: Option<String>,
     pub updated_at: Option<String>,
@@ -22,6 +24,13 @@ pub struct RadarSnapshot {
     pub site_url: String,
     pub cached: bool,
     pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RadarResetSignal {
+    pub label: String,
+    pub headline: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -59,12 +68,16 @@ impl RadarService {
     pub async fn refresh(&self, previous: &RadarSnapshot) -> RadarSnapshot {
         let summary = self.fetch_json(PUBLIC_RADAR_URL);
         let ratings = self.fetch_json(PUBLIC_RATINGS_URL);
-        let (result, ratings) = tokio::join!(summary, ratings);
+        let page = self.fetch_text(PUBLIC_RADAR_PAGE_URL);
+        let (result, ratings, page) = tokio::join!(summary, ratings, page);
         match result {
             Ok(value) => match parse_summary(&value, now_millis()) {
                 Ok(mut snapshot) => {
                     if let Ok(value) = ratings {
                         apply_ratings(&mut snapshot, &value);
+                    }
+                    if let Ok(html) = page {
+                        snapshot.reset_signals = parse_reset_signals(&html);
                     }
                     snapshot
                 }
@@ -88,6 +101,76 @@ impl RadarService {
             .await
             .map_err(|error| format!("Radar 响应无法解析：{error}"))
     }
+
+    async fn fetch_text(&self, url: &str) -> Result<String, String> {
+        crate::network::client(Duration::from_secs(12))?
+            .get(url)
+            .header("Accept", "text/html")
+            .header("User-Agent", "codex-quota-bar/0.11")
+            .header("Cache-Control", "no-cache")
+            .send()
+            .await
+            .and_then(|response| response.error_for_status())
+            .map_err(|error| safe_error(&error))?
+            .text()
+            .await
+            .map_err(|error| format!("Radar 页面无法解析：{error}"))
+    }
+}
+
+fn strip_html(value: &str) -> String {
+    let mut output = String::new();
+    let mut in_tag = false;
+    for character in value.chars() {
+        match character {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            _ if !in_tag => output.push(character),
+            _ => {}
+        }
+    }
+    output
+        .replace("&amp;", "&")
+        .replace("&middot;", "·")
+        .replace("&nbsp;", " ")
+        .trim()
+        .to_string()
+}
+
+fn element_text(fragment: &str, tag: &str) -> Option<String> {
+    let start = fragment.find(&format!("<{tag}"))?;
+    let content = fragment[start..].find('>')? + start + 1;
+    let end = fragment[content..].find(&format!("</{tag}>"))? + content;
+    let value = strip_html(&fragment[content..end]);
+    (!value.is_empty()).then_some(value)
+}
+
+fn parse_reset_signals(html: &str) -> Vec<RadarResetSignal> {
+    let Some(section_start) = html.find("reset-judgement-grid") else {
+        return Vec::new();
+    };
+    let section = &html[section_start..];
+    let mut cursor = 0;
+    let mut signals = Vec::new();
+    while signals.len() < 2 {
+        let Some(article_start) = section[cursor..].find("<article") else {
+            break;
+        };
+        let article_start = cursor + article_start;
+        let Some(article_end) = section[article_start..].find("</article>") else {
+            break;
+        };
+        let article_end = article_start + article_end + "</article>".len();
+        let article = &section[article_start..article_end];
+        if let (Some(label), Some(headline)) = (
+            element_text(article, "span"),
+            element_text(article, "strong"),
+        ) {
+            signals.push(RadarResetSignal { label, headline });
+        }
+        cursor = article_end;
+    }
+    signals
 }
 
 fn parse_model(id: String, label: String, value: &Value) -> RadarModel {
@@ -227,6 +310,7 @@ fn parse_summary(root: &Value, fetched_at: i64) -> Result<RadarSnapshot, String>
             .or_else(|| root.pointer("/window/message").and_then(Value::as_str))
             .or_else(|| root.pointer("/prediction/summary").and_then(Value::as_str))
             .map(str::to_string),
+        reset_signals: Vec::new(),
         batch: model_iq.get("latest").and_then(|v| text(v, "date")),
         quota_batch: quota.and_then(|v| text(v, "date")),
         updated_at: quota
@@ -339,6 +423,27 @@ mod tests {
                 "gpt-5.6-sol-low",
                 "gpt-5.6-terra-xhigh",
                 "gpt-5.6-luna-medium"
+            ]
+        );
+    }
+
+    #[test]
+    fn parses_live_reset_judgement_cards() {
+        let html = r#"<section class="reset-judgement"><div class="reset-judgement-grid">
+          <article><span>发重置卡</span><strong>官方已宣布 · 50 万已发、明日全量</strong></article>
+          <article><span>硬重置</span><strong>刚落地 · 短期再重置概率低</strong></article>
+        </div></section>"#;
+        assert_eq!(
+            parse_reset_signals(html),
+            vec![
+                RadarResetSignal {
+                    label: "发重置卡".into(),
+                    headline: "官方已宣布 · 50 万已发、明日全量".into()
+                },
+                RadarResetSignal {
+                    label: "硬重置".into(),
+                    headline: "刚落地 · 短期再重置概率低".into()
+                },
             ]
         );
     }

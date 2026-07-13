@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { flushSync } from "react-dom";
 import {
   Activity, AlertCircle, Check, CheckCircle2, Clock3, Download, Folder,
   Gauge, LogOut, Moon, Palette, RadioTower, RefreshCw, Settings2, ShieldCheck, Sparkles, Sun, X,
@@ -20,7 +21,7 @@ interface UpdateStatus {
 interface RadarSnapshot {
   models: Array<{ id: string; label: string; score?: number; status?: string; passed?: number; validTasks?: number; invalidTasks?: number; wallTime?: string; costUsd?: number; communityScore?: number; communityVotes?: number }>;
   quotaRows: Array<{ tier: string; fiveHour?: number; sevenDay?: number; basis?: string }>;
-  status?: string; signal?: string; batch?: string; quotaBatch?: string; updatedAt?: string;
+  status?: string; signal?: string; resetSignals?: Array<{ label: string; headline: string }>; batch?: string; quotaBatch?: string; updatedAt?: string;
   fetchedAt?: number; source: string; attribution: string; siteUrl: string; cached: boolean; error?: string;
 }
 
@@ -180,14 +181,18 @@ function UpdateBadge({ status }: { status: UpdateStatus }) {
   </span>;
 }
 
+const CURRENT_CHANGELOG = "采用 View Transitions API 重做主题圆形扩散动画；更新区域常驻显示当前版本信息；Radar 自动同步发重置卡与硬重置研判。";
+const CURRENT_RELEASE_DATE = "2026-07-13";
+
 function UpdatePanel({ status, onRefresh, refreshing }: { status: UpdateStatus; onRefresh: () => void; refreshing: boolean }) {
-  if (status.state !== "available") return null;
-  return <section className="soft-card update-panel" data-reveal>
-    <div><span className="eyebrow"><Download size={13} /> 可用更新</span><strong>Codex Quota Bar {status.availableVersion}</strong></div>
-    {status.message && <p>{status.message}</p>}
+  const available = status.state === "available";
+  return <section className={`soft-card update-panel ${available ? "has-update" : ""}`} data-reveal>
+    <div><span className="eyebrow"><Download size={13} /> {available ? "可用更新" : "当前版本"}</span><strong>Codex Quota Bar {available ? status.availableVersion : `v${status.currentVersion}`}</strong></div>
+    <p>{available ? (status.message ?? "新版本已经可以安装。") : CURRENT_CHANGELOG}</p>
+    {!available && <time>更新时间：{CURRENT_RELEASE_DATE}</time>}
     <div className="update-panel-actions">
       <button className="soft-button" onClick={onRefresh} disabled={refreshing}><RefreshCw size={14} className={refreshing ? "spin" : ""} />重新检查</button>
-      <button className="soft-button accent" onClick={() => invoke("install_update")}><Download size={14} />安装更新</button>
+      {available && <button className="soft-button accent install-update-button" onClick={() => invoke("install_update")}><Download size={14} />安装更新</button>}
     </div>
   </section>;
 }
@@ -200,6 +205,7 @@ function DetailView() {
     return saved === "light" || saved === "dark" ? saved : null;
   });
   const dark = themeOverride ? themeOverride === "dark" : systemDark;
+  useEffect(() => { document.documentElement.dataset.detailTheme = dark ? "dark" : "light"; }, [dark]);
   const update = useUpdateStatus();
   const radar = useRadar();
   const settings = useSettings();
@@ -207,7 +213,6 @@ function DetailView() {
   const [refreshing, setRefreshing] = useState(false);
   const [windowCycle, setWindowCycle] = useState(0);
   const [windowPhase, setWindowPhase] = useState<"entering" | "visible" | "leaving">("entering");
-  const [themeRipple, setThemeRipple] = useState<{ x: number; y: number; target: "light" | "dark" } | null>(null);
   const closeTimer = useRef<number>();
   const closing = useRef(false);
   const hasFocused = useRef(false);
@@ -273,16 +278,26 @@ function DetailView() {
   }, [detailTab, radar.models.length, snapshot.windows.length, update.state, windowCycle]);
   const toggleTheme = (event: MouseEvent<HTMLButtonElement>) => {
     const next = dark ? "light" : "dark";
-    const shell = event.currentTarget.closest(".soft-shell")?.getBoundingClientRect();
-    setThemeRipple({ x: event.clientX - (shell?.left ?? 0), y: event.clientY - (shell?.top ?? 0), target: next });
-    window.setTimeout(() => {
+    const x = event.clientX;
+    const y = event.clientY;
+    const radius = Math.hypot(Math.max(x, window.innerWidth - x), Math.max(y, window.innerHeight - y));
+    const applyTheme = () => flushSync(() => {
       window.localStorage.setItem("detail-theme", next);
+      document.documentElement.dataset.detailTheme = next;
       setThemeOverride(next);
-      window.setTimeout(() => setThemeRipple(null), 80);
-    }, 300);
+    });
+    const startViewTransition = (document as Document & { startViewTransition?: (callback: () => void) => { ready: Promise<void> } }).startViewTransition;
+    if (!startViewTransition) { applyTheme(); return; }
+    const transition = startViewTransition.call(document, applyTheme);
+    void transition.ready.then(() => {
+      const path = [`circle(0px at ${x}px ${y}px)`, `circle(${radius}px at ${x}px ${y}px)`];
+      document.documentElement.animate(
+        { clipPath: next === "dark" ? [...path].reverse() : path },
+        { duration: 420, easing: "ease-in", fill: "forwards", pseudoElement: next === "dark" ? "::view-transition-old(root)" : "::view-transition-new(root)" },
+      );
+    });
   };
   return <main key={windowCycle} className={`soft-shell detail-panel window-${windowPhase}`} data-theme={dark ? "dark" : "light"}>
-    {themeRipple && <span className={`theme-ripple theme-ripple-${themeRipple.target}`} style={{ left: themeRipple.x, top: themeRipple.y }} />}
     <span className="ambient-orb orb-one" /><span className="ambient-orb orb-two" />
     <WindowHeader title="Codex Quota Bar" subtitle="额度中心" icon={<Sparkles size={15} />} onClose={closeAnimated}
       actions={<button className="soft-icon-button theme-button" aria-label={dark ? "切换为亮色主题" : "切换为暗色主题"} title={dark ? "切换为亮色主题" : "切换为暗色主题"} onClick={toggleTheme}>{dark ? <Moon size={16} /> : <Sun size={16} />}</button>} />
@@ -330,7 +345,8 @@ function RadarView({ radar }: { radar: RadarSnapshot }) {
     <section className="soft-card radar-heading interactive-surface" data-reveal onMouseMove={trackPointer} onMouseLeave={resetPointer}><div><span className={`radar-live ${radar.status ?? ""}`} /><div><strong>模型能力雷达</strong><small>{radar.batch ?? "等待数据"} · Public</small></div></div>
       <button className="soft-icon-button" title="刷新 Radar" onClick={refresh}><RefreshCw size={15} className={refreshing ? "spin" : ""} /></button></section>
     {radar.error && <div className="soft-alert"><AlertCircle size={14} />{radar.error}{radar.cached ? "（显示缓存）" : ""}</div>}
-    {radar.signal && <div className="radar-signal" data-reveal><RadioTower size={14} /><span>{radar.signal}</span></div>}
+    {radar.resetSignals?.length ? <div className="radar-reset-signals" data-reveal>{radar.resetSignals.map((item) => <div key={item.label}><span>{item.label}</span><strong>{item.headline}</strong></div>)}</div>
+      : radar.signal && <div className="radar-signal" data-reveal><RadioTower size={14} /><span>{radar.signal}</span></div>}
     <div className="radar-model-grid">{radar.models.length ? radar.models.map((model) => <article className="soft-card radar-model interactive-surface" data-reveal key={model.id} style={{ "--radar-color": radarColor(model.score) } as CSSProperties} onMouseMove={trackPointer} onMouseLeave={resetPointer}>
       <strong className="radar-model-name">{model.label}</strong>
       <div className="radar-iq"><small>IQ 分数</small><strong>{model.score?.toFixed(1) ?? "--"}</strong></div>
