@@ -181,7 +181,7 @@ function UpdateBadge({ status }: { status: UpdateStatus }) {
   </span>;
 }
 
-const CURRENT_CHANGELOG = "采用 View Transitions API 重做主题圆形扩散动画；更新区域常驻显示当前版本信息；Radar 自动同步发重置卡与硬重置研判。";
+const CURRENT_CHANGELOG = "完善 GitHub Release 更新日志；修复频繁主题切换的快照冲突；设置窗口继承详情页主题；放大并重排 Radar 研判与版本日志。";
 const CURRENT_RELEASE_DATE = "2026-07-13";
 
 function UpdatePanel({ status, onRefresh, refreshing }: { status: UpdateStatus; onRefresh: () => void; refreshing: boolean }) {
@@ -213,6 +213,8 @@ function DetailView() {
   const [refreshing, setRefreshing] = useState(false);
   const [windowCycle, setWindowCycle] = useState(0);
   const [windowPhase, setWindowPhase] = useState<"entering" | "visible" | "leaving">("entering");
+  const [themeTransitioning, setThemeTransitioning] = useState(false);
+  const themeTransitionActive = useRef(false);
   const closeTimer = useRef<number>();
   const closing = useRef(false);
   const hasFocused = useRef(false);
@@ -277,6 +279,7 @@ function DetailView() {
     return () => observer.disconnect();
   }, [detailTab, radar.models.length, snapshot.windows.length, update.state, windowCycle]);
   const toggleTheme = (event: MouseEvent<HTMLButtonElement>) => {
+    if (themeTransitionActive.current) return;
     const next = dark ? "light" : "dark";
     const x = event.clientX;
     const y = event.clientY;
@@ -286,8 +289,10 @@ function DetailView() {
       document.documentElement.dataset.detailTheme = next;
       setThemeOverride(next);
     });
-    const startViewTransition = (document as Document & { startViewTransition?: (callback: () => void) => { ready: Promise<void> } }).startViewTransition;
+    const startViewTransition = (document as Document & { startViewTransition?: (callback: () => void) => { ready: Promise<void>; finished: Promise<void> } }).startViewTransition;
     if (!startViewTransition) { applyTheme(); return; }
+    themeTransitionActive.current = true;
+    setThemeTransitioning(true);
     const transition = startViewTransition.call(document, applyTheme);
     void transition.ready.then(() => {
       const path = [`circle(0px at ${x}px ${y}px)`, `circle(${radius}px at ${x}px ${y}px)`];
@@ -296,11 +301,15 @@ function DetailView() {
         { duration: 420, easing: "ease-in", fill: "forwards", pseudoElement: next === "dark" ? "::view-transition-old(root)" : "::view-transition-new(root)" },
       );
     });
+    void transition.finished.finally(() => {
+      themeTransitionActive.current = false;
+      setThemeTransitioning(false);
+    });
   };
   return <main key={windowCycle} className={`soft-shell detail-panel window-${windowPhase}`} data-theme={dark ? "dark" : "light"}>
     <span className="ambient-orb orb-one" /><span className="ambient-orb orb-two" />
     <WindowHeader title="Codex Quota Bar" subtitle="额度中心" icon={<Sparkles size={15} />} onClose={closeAnimated}
-      actions={<button className="soft-icon-button theme-button" aria-label={dark ? "切换为亮色主题" : "切换为暗色主题"} title={dark ? "切换为亮色主题" : "切换为暗色主题"} onClick={toggleTheme}>{dark ? <Moon size={16} /> : <Sun size={16} />}</button>} />
+      actions={<button className="soft-icon-button theme-button" disabled={themeTransitioning} aria-label={dark ? "切换为亮色主题" : "切换为暗色主题"} title={dark ? "切换为亮色主题" : "切换为暗色主题"} onClick={toggleTheme}>{dark ? <Moon size={16} /> : <Sun size={16} />}</button>} />
     <nav className="detail-tabs"><button className={detailTab === "quota" ? "is-active" : ""} onClick={() => setDetailTab("quota")}><Gauge size={13} />额度</button>
       {settings?.radarEnabled !== false && <button className={detailTab === "radar" ? "is-active" : ""} onClick={() => setDetailTab("radar")}><RadioTower size={13} />Codex Radar</button>}</nav>
     <div className="soft-scroll detail-content">
@@ -443,7 +452,19 @@ function RangeSetting({ label, value, min, max, step = 1, unit, onChange }: { la
 
 function SettingsView() {
   const settings = useSettings();
-  const dark = useDarkTheme(settings?.followSystemTheme ?? true);
+  const systemDark = useDarkTheme(settings?.followSystemTheme ?? true);
+  const [savedTheme, setSavedTheme] = useState<"light" | "dark" | null>(() => {
+    const saved = window.localStorage.getItem("detail-theme");
+    return saved === "light" || saved === "dark" ? saved : null;
+  });
+  useEffect(() => {
+    const syncTheme = (event: StorageEvent) => {
+      if (event.key === "detail-theme" && (event.newValue === "light" || event.newValue === "dark")) setSavedTheme(event.newValue);
+    };
+    window.addEventListener("storage", syncTheme);
+    return () => window.removeEventListener("storage", syncTheme);
+  }, []);
+  const dark = savedTheme ? savedTheme === "dark" : systemDark;
   return <main className="soft-shell settings-window" data-theme={dark ? "dark" : "light"}>
     <span className="ambient-orb orb-one" /><span className="ambient-orb orb-two" />
     <WindowHeader title="个性化设置" subtitle="Soft UI 控制中心" icon={<Settings2 size={15} />} />

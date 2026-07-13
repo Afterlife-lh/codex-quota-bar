@@ -54,6 +54,13 @@ Installing a newer MSI upgrades an existing installation.
 
 ## Changelog
 
+### 0.12.0
+
+- Release notes are now generated from the curated README changelog, and the published v0.11.0 notes were corrected.
+- Theme transitions are serialized to prevent rapid switching from blanking the detail snapshot during dark-to-light animation.
+- Settings inherit the theme saved by the detail window and respond to cross-window theme changes.
+- Enlarged release-note and Radar judgement typography, with banked-reset and hard-reset cards stacked vertically.
+
 ### 0.11.0
 
 - Rebuilt theme switching with the View Transitions API and an Element Plus-style circular reveal/conceal originating from the theme button.
