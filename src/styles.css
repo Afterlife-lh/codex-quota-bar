@@ -100,10 +100,11 @@ button { color: inherit; }
 .interactive-surface > * { position: relative; z-index: 1; }
 .interactive-surface:hover { transform: perspective(700px) rotateX(var(--tilt-x)) rotateY(var(--tilt-y)) translateY(-3px); border-color: color-mix(in srgb, var(--accent) 24%, transparent); box-shadow: 11px 13px 22px var(--shadow-dark), -8px -8px 18px var(--shadow-light); }
 .interactive-surface:hover::after { opacity: 1; }
-.detail-panel > :not(.theme-ripple) { position: relative; z-index: 1; }
-.theme-ripple { position: absolute; z-index: 0; width: 1100px; height: 1100px; margin: -550px 0 0 -550px; border-radius: 50%; pointer-events: none; transform: scale(0); will-change: transform; animation: theme-ripple 380ms cubic-bezier(.2,.72,.2,1) forwards; }
-.theme-ripple-light { background: linear-gradient(145deg, #f4f7fc, #e2e9f3); }
-.theme-ripple-dark { background: linear-gradient(145deg, #262d3b, #191e29); }
+::view-transition-old(root), ::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
+::view-transition-old(root) { z-index: 1; }
+::view-transition-new(root) { z-index: 2147483646; }
+html[data-detail-theme="dark"]::view-transition-old(root) { z-index: 2147483646; }
+html[data-detail-theme="dark"]::view-transition-new(root) { z-index: 1; }
 .soft-icon-button { width: 34px; height: 34px; display: inline-grid; place-items: center; border: 0; border-radius: 12px; color: var(--muted); cursor: pointer; background: linear-gradient(145deg, var(--surface-2), var(--surface)); box-shadow: 5px 5px 11px var(--shadow-dark), -5px -5px 11px var(--shadow-light); transition: transform 160ms ease, color 160ms ease, box-shadow 160ms ease; }
 .soft-icon-button:hover { color: var(--accent); transform: translateY(-1px); }
 .soft-icon-button:active { transform: translateY(1px) scale(.97); box-shadow: inset 4px 4px 8px var(--shadow-dark), inset -4px -4px 8px var(--shadow-light); }
@@ -139,7 +140,9 @@ button { color: inherit; }
 .update-panel > div:first-child { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .update-panel > div:first-child > strong { color: var(--accent); font-size: 12px; }
 .update-panel p { max-height: 78px; margin: 9px 0; overflow: auto; color: var(--muted); font-size: 10px; line-height: 15px; white-space: pre-wrap; }
+.update-panel time { display: block; margin: -4px 0 9px; color: var(--muted); font-size: 9px; }
 .update-panel-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.install-update-button { animation: install-button-in 260ms cubic-bezier(.2,.8,.2,1) both; }
 
 /* Codex Radar */
 .radar-panel { padding-top: 3px; }
@@ -153,6 +156,10 @@ button { color: inherit; }
 .radar-live.red, .radar-live.error { background: var(--danger); }
 .radar-signal { min-height: 38px; margin-bottom: 12px; padding: 8px 11px; border-radius: 12px; display: flex; align-items: center; gap: 8px; color: var(--muted); background: var(--surface-deep); box-shadow: inset 3px 3px 7px var(--shadow-dark), inset -3px -3px 7px var(--shadow-light); font-size: 10px; }
 .radar-signal span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.radar-reset-signals { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+.radar-reset-signals > div { min-width: 0; padding: 9px 10px; border-radius: 12px; background: var(--surface-deep); box-shadow: inset 3px 3px 7px var(--shadow-dark), inset -3px -3px 7px var(--shadow-light); }
+.radar-reset-signals span { display: block; margin-bottom: 3px; color: var(--muted); font-size: 8px; }
+.radar-reset-signals strong { display: block; color: var(--text); font-size: 10px; line-height: 14px; }
 .radar-model-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(105px, 1fr)); gap: 9px; margin-bottom: 12px; }
 .radar-model { min-height: 164px; padding: 12px 10px 10px; display: flex; flex-direction: column; overflow: hidden; border-top: 3px solid var(--radar-color); }
 .radar-model-name { min-height: 34px; overflow: hidden; color: var(--text); font-size: 12.5px; font-weight: 740; line-height: 16px; }
@@ -227,8 +234,8 @@ button { color: inherit; }
 @keyframes shell-in { from { opacity: 0; transform: translateY(10px) scale(.975); } to { opacity: 1; transform: none; } }
 @keyframes detail-enter { 0% { opacity: 0; transform: translateY(18px) scale(.955); filter: blur(5px); } 60% { opacity: 1; filter: blur(0); } 100% { opacity: 1; transform: none; filter: none; } }
 @keyframes detail-exit { from { opacity: 1; transform: none; filter: none; } to { opacity: 0; transform: translateY(10px) scale(.97); filter: blur(3px); } }
-@keyframes theme-ripple { from { transform: scale(0); } to { transform: scale(1); } }
 @keyframes update-panel-in { from { opacity: 0; transform: translateY(10px) scale(.98); } to { opacity: 1; transform: none; } }
+@keyframes install-button-in { from { opacity: 0; transform: translateX(8px) scale(.94); } to { opacity: 1; transform: none; } }
 @keyframes update-pulse { 50% { opacity: .55; transform: scale(.8); } }
 @keyframes card-rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
 @keyframes gentle-float { 50% { transform: translateY(-3px); } }
