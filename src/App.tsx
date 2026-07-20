@@ -181,8 +181,8 @@ function UpdateBadge({ status }: { status: UpdateStatus }) {
   </span>;
 }
 
-const CURRENT_CHANGELOG = "完善 GitHub Release 更新日志；修复频繁主题切换的快照冲突；设置窗口继承详情页主题；放大并重排 Radar 研判与版本日志。";
-const CURRENT_RELEASE_DATE = "2026-07-13";
+const CURRENT_CHANGELOG = "修正 Codex Radar 参考价格与参考时间，改为读取官方接口的单任务平均值；任务栏定位改为自适应低频轮询，并新增节能、平衡、流畅三档设置，显著降低空闲 CPU 占用。";
+const CURRENT_RELEASE_DATE = "2026-07-20";
 
 function UpdatePanel({ status, onRefresh, refreshing }: { status: UpdateStatus; onRefresh: () => void; refreshing: boolean }) {
   const available = status.state === "available";
@@ -419,6 +419,7 @@ function SettingsPanel({ value, onSaved }: { value: AppSettings; onSaved: (next:
       <ToggleSetting label="反转环形－额度－倒计时" checked={draft.reverseLayout} onChange={(reverseLayout) => setDraft({ ...draft, reverseLayout })} />
       <ToggleSetting label="随 Windows 登录启动" checked={draft.autostart} onChange={(autostart) => setDraft({ ...draft, autostart })} />
       <ToggleSetting label="启用 Codex Radar" checked={draft.radarEnabled} onChange={(radarEnabled) => setDraft({ ...draft, radarEnabled })} />
+      <PollingSetting value={draft.pollingMode} onChange={(pollingMode) => setDraft({ ...draft, pollingMode })} />
     </Section>
     <Section icon={<Download size={15} />} title="软件更新">
       <div className="update-row"><div><strong>自动安装更新</strong><small>关闭时仍检查版本，但只在手动确认后安装</small></div><Toggle checked={draft.autoUpdate} onChange={(autoUpdate) => setDraft({ ...draft, autoUpdate })} /></div>
@@ -442,6 +443,14 @@ function SelectSetting({ label, value, onChange }: { label: string; value: "left
   return <label className="select-setting"><span>{label}</span><select value={value} onChange={(event) => onChange(event.target.value as "left" | "right")}>
     <option value="left">左侧</option><option value="right">右侧</option>
   </select></label>;
+}
+
+function PollingSetting({ value, onChange }: { value: AppSettings["pollingMode"]; onChange: (value: AppSettings["pollingMode"]) => void }) {
+  return <label className="select-setting polling-setting"><span>任务栏轮询率</span><select value={value} onChange={(event) => onChange(event.target.value as AppSettings["pollingMode"])}>
+    <option value="eco">节能 · 1 秒</option>
+    <option value="balanced">平衡 · 250 毫秒</option>
+    <option value="smooth">流畅 · 100 毫秒</option>
+  </select><small>空闲时降低检测频率；发生位移时会自动临时提升到 60Hz，保持动画流畅。</small></label>;
 }
 
 function RangeSetting({ label, value, min, max, step = 1, unit, onChange }: { label: string; value: number; min: number; max: number; step?: number; unit: string; onChange: (value: number) => void }) {

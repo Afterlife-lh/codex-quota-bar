@@ -188,8 +188,15 @@ fn parse_model(id: String, label: String, value: &Value) -> RadarModel {
             .get("invalid_tasks")
             .or_else(|| value.get("invalid"))
             .and_then(Value::as_i64),
-        wall_time: text(value, "wall_time_human"),
-        cost_usd: value.get("cost_usd").and_then(Value::as_f64),
+        // current.json exposes both aggregate batch totals and per-task averages.
+        // Cards represent the cost and duration of one representative task, so
+        // prefer the average fields while retaining compatibility with old data.
+        wall_time: text(value, "average_task_time_human")
+            .or_else(|| text(value, "wall_time_human")),
+        cost_usd: value
+            .get("average_cost_usd")
+            .and_then(Value::as_f64)
+            .or_else(|| value.get("cost_usd").and_then(Value::as_f64)),
         community_score: None,
         community_votes: None,
     }
@@ -370,14 +377,14 @@ mod tests {
         let value: Value = serde_json::from_str(r#"{
           "status":"community_confirmed","window":{"message":"等待下一轮"},
           "api_access":{"requirements":{"attribution_text":"数据来自 Codex 雷达 codexradar.com","site":"https://codexradar.com"}},
-          "model_iq":{"latest":{"date":"2026-07-11-pm","model":"gpt-5.6-sol","reasoning_effort":"max","score":135,"passed":9,"valid_tasks":10,"cost_usd":49.8,"wall_time_human":"3.4h"},
+          "model_iq":{"latest":{"date":"2026-07-20","model":"gpt-5.6-sol","reasoning_effort":"max","score":135,"passed":9,"valid_tasks":10,"cost_usd":1053.478825,"wall_time_human":"69小时4分","average_cost_usd":9.406061,"average_task_seconds":2220.116,"average_task_time_human":"37分钟"},
           "comparisons":{"future_model":{"label":"Future high","latest":{"score":105,"passed":7,"tasks":10}}},
           "quota_radar":{"date":"2026-07-11-pm","rows":[{"tier":"20x Pro","five_h":328.15,"seven_d":1968.9,"basis":"measured"}]}}
         }"#).unwrap();
         let snapshot = parse_summary(&value, 42).unwrap();
         assert_eq!(snapshot.models.len(), 2);
-        assert_eq!(snapshot.models[0].cost_usd, Some(49.8));
-        assert_eq!(snapshot.models[0].wall_time.as_deref(), Some("3.4h"));
+        assert_eq!(snapshot.models[0].cost_usd, Some(9.406061));
+        assert_eq!(snapshot.models[0].wall_time.as_deref(), Some("37分钟"));
         assert_eq!(snapshot.models[1].label, "Future high");
         assert_eq!(snapshot.quota_rows[0].five_hour, Some(328.15));
         assert_eq!(snapshot.fetched_at, Some(42));
