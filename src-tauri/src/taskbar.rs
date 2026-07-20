@@ -327,6 +327,23 @@ mod platform {
         }
     }
 
+    pub fn keep_widget_visible(hwnd: HWND) {
+        unsafe {
+            // Explorer can reorder topmost taskbar windows whenever a task button
+            // is activated. Reassert our place in that band with one cheap call;
+            // unlike show_widget this does not rewrite styles or call ShowWindow.
+            SetWindowPos(
+                hwnd,
+                HWND_TOPMOST,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+            );
+        }
+    }
+
     pub fn hide_widget(hwnd: HWND) {
         unsafe {
             ShowWindow(hwnd, SW_HIDE);
@@ -400,6 +417,7 @@ mod platform {
     pub fn move_window(_: ExternalWindow, _: i32, _: i32) {}
     pub fn prepare_widget(_: *mut std::ffi::c_void) {}
     pub fn show_widget(_: *mut std::ffi::c_void) {}
+    pub fn keep_widget_visible(_: *mut std::ffi::c_void) {}
     pub fn hide_widget(_: *mut std::ffi::c_void) {}
     pub fn should_hide_widget() -> bool {
         false
@@ -798,14 +816,18 @@ pub fn spawn_reposition_loop(app: AppHandle, state: std::sync::Arc<crate::AppSta
                     platform::move_widget(hwnd as _, x, y);
                     last_applied_position = Some((x, y));
                 }
-                if !shown {
-                    platform::show_widget(hwnd as _);
-                    shown = true;
-                }
-
                 let animating = settings.animations
                     && progress < 1.0
                     && animation_from != (target.x, target.y);
+                if !shown {
+                    platform::show_widget(hwnd as _);
+                    shown = true;
+                } else if !animating {
+                    // A low-frequency Z-order keepalive repairs Explorer taskbar
+                    // reordering without returning to the former 60Hz Win32 loop.
+                    platform::keep_widget_visible(hwnd as _);
+                }
+
                 let interval = if animating {
                     std::time::Duration::from_millis(16)
                 } else {
