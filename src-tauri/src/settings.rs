@@ -11,6 +11,32 @@ pub enum TaskbarSide {
     Right,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PollingMode {
+    Eco,
+    Balanced,
+    Smooth,
+}
+
+impl PollingMode {
+    pub fn idle_interval(self) -> std::time::Duration {
+        std::time::Duration::from_millis(match self {
+            Self::Eco => 1_000,
+            Self::Balanced => 250,
+            Self::Smooth => 100,
+        })
+    }
+
+    pub fn lyricify_interval(self) -> std::time::Duration {
+        std::time::Duration::from_millis(match self {
+            Self::Eco => 1_500,
+            Self::Balanced => 750,
+            Self::Smooth => 300,
+        })
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct AppSettings {
@@ -32,6 +58,7 @@ pub struct AppSettings {
     pub reverse_layout: bool,
     pub auto_update: bool,
     pub radar_enabled: bool,
+    pub polling_mode: PollingMode,
 }
 
 impl Default for AppSettings {
@@ -54,6 +81,7 @@ impl Default for AppSettings {
             reverse_layout: false,
             auto_update: false,
             radar_enabled: true,
+            polling_mode: PollingMode::Balanced,
         }
     }
 }
@@ -125,5 +153,6 @@ mod tests {
         assert!(!parsed.reverse_layout);
         assert!(!parsed.auto_update);
         assert!(parsed.radar_enabled);
+        assert_eq!(parsed.polling_mode, PollingMode::Balanced);
     }
 }

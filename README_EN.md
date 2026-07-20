@@ -54,6 +54,12 @@ Installing a newer MSI upgrades an existing installation.
 
 ## Changelog
 
+### 0.13.0
+
+- Fixed Codex Radar reference price and duration by preferring the official API's per-task averages; Sol Max now correctly displays approximately `$9.4 / 37 min`.
+- Reworked taskbar positioning so idle loops no longer move or show an unchanged window, while active movement animations temporarily run at 60 Hz.
+- Added Eco, Balanced, and Smooth taskbar polling modes. Balanced (250 ms) is the default compromise between responsiveness and idle CPU use.
+
 ### 0.12.0
 
 - Release notes are now generated from the curated README changelog, and the published v0.11.0 notes were corrected.

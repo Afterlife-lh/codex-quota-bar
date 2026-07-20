@@ -35,6 +35,7 @@ export interface AppSettings {
   reverseLayout: boolean;
   autoUpdate: boolean;
   radarEnabled: boolean;
+  pollingMode: "eco" | "balanced" | "smooth";
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -54,6 +55,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   reverseLayout: false,
   autoUpdate: false,
   radarEnabled: true,
+  pollingMode: "balanced",
 };
 
 export function normalizeSettings(value?: Partial<AppSettings> | null): AppSettings {

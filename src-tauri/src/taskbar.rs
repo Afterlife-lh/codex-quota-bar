@@ -733,10 +733,12 @@ pub fn spawn_reposition_loop(app: AppHandle, state: std::sync::Arc<crate::AppSta
         let mut animation_from = (0_i32, 0_i32);
         let mut animation_started = std::time::Instant::now();
         let mut suppressed = false;
+        let mut shown = false;
+        let mut last_applied_position: Option<(i32, i32)> = None;
         loop {
             if platform::should_hide_widget() {
-                platform::hide_widget(hwnd as _);
                 if !suppressed {
+                    platform::hide_widget(hwnd as _);
                     for label in ["detail", "menu", "settings"] {
                         if let Some(auxiliary) = app.get_webview_window(label) {
                             let _ = auxiliary.hide();
@@ -744,14 +746,15 @@ pub fn spawn_reposition_loop(app: AppHandle, state: std::sync::Arc<crate::AppSta
                     }
                 }
                 suppressed = true;
-                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                shown = false;
+                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
                 continue;
             }
             suppressed = false;
             let settings = state.settings.read().await.clone();
             let now = std::time::Instant::now();
             let coordinate_lyricify =
-                now.duration_since(last_lyricify_scan) >= std::time::Duration::from_millis(500);
+                now.duration_since(last_lyricify_scan) >= settings.polling_mode.lyricify_interval();
             if coordinate_lyricify {
                 lyricify = platform::geometry()
                     .map(|geometry| geometry.taskbar)
@@ -791,10 +794,27 @@ pub fn spawn_reposition_loop(app: AppHandle, state: std::sync::Arc<crate::AppSta
                     + ((target.x - animation_from.0) as f64 * eased).round() as i32;
                 let y = animation_from.1
                     + ((target.y - animation_from.1) as f64 * eased).round() as i32;
-                platform::move_widget(hwnd as _, x, y);
-                platform::show_widget(hwnd as _);
+                if last_applied_position != Some((x, y)) {
+                    platform::move_widget(hwnd as _, x, y);
+                    last_applied_position = Some((x, y));
+                }
+                if !shown {
+                    platform::show_widget(hwnd as _);
+                    shown = true;
+                }
+
+                let animating = settings.animations
+                    && progress < 1.0
+                    && animation_from != (target.x, target.y);
+                let interval = if animating {
+                    std::time::Duration::from_millis(16)
+                } else {
+                    settings.polling_mode.idle_interval()
+                };
+                tokio::time::sleep(interval).await;
+                continue;
             }
-            tokio::time::sleep(std::time::Duration::from_millis(16)).await;
+            tokio::time::sleep(settings.polling_mode.idle_interval()).await;
         }
     });
 }
