@@ -181,7 +181,7 @@ function UpdateBadge({ status }: { status: UpdateStatus }) {
   </span>;
 }
 
-const CURRENT_CHANGELOG = "修正 Codex Radar 参考价格与参考时间，改为读取官方接口的单任务平均值；任务栏定位改为自适应低频轮询，并新增节能、平衡、流畅三档设置，显著降低空闲 CPU 占用。";
+const CURRENT_CHANGELOG = "修复点击任务按钮后任务栏额度组件被 Explorer 遮挡且无法恢复的问题；使用低频 Z 顺序保活兼顾可靠显示与低 CPU 占用。包含 v0.13.0 的 Radar 平均价格/耗时修正和轮询率设置。";
 const CURRENT_RELEASE_DATE = "2026-07-20";
 
 function UpdatePanel({ status, onRefresh, refreshing }: { status: UpdateStatus; onRefresh: () => void; refreshing: boolean }) {

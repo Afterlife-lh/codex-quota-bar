@@ -54,6 +54,11 @@ Installing a newer MSI upgrades an existing installation.
 
 ## Changelog
 
+### 0.13.1
+
+- Fixed the quota widget being pushed behind Explorer and never recovering after a taskbar application was activated.
+- Added a low-frequency Z-order keepalive. The default mode repairs taskbar stacking every 250 ms with one lightweight Win32 call, without restoring the former 60 Hz idle loop.
+
 ### 0.13.0
 
 - Fixed Codex Radar reference price and duration by preferring the official API's per-task averages; Sol Max now correctly displays approximately `$9.4 / 37 min`.
