@@ -4,6 +4,7 @@ mod quota;
 mod radar;
 mod settings;
 mod taskbar;
+mod token_usage;
 mod updater;
 #[cfg(test)]
 mod visual;
@@ -37,6 +38,8 @@ pub struct AppState {
     pending_update: Mutex<Option<updater::UpdateRelease>>,
     radar: radar::RadarService,
     radar_snapshot: RwLock<radar::RadarSnapshot>,
+    token_usage_cache_path: PathBuf,
+    token_usage_lock: Mutex<()>,
 }
 
 impl AppState {
@@ -46,6 +49,7 @@ impl AppState {
         settings_path: PathBuf,
         current_version: String,
         radar: radar::RadarService,
+        token_usage_cache_path: PathBuf,
     ) -> Self {
         Self {
             quota,
@@ -60,6 +64,8 @@ impl AppState {
             pending_update: Mutex::new(None),
             radar,
             radar_snapshot: RwLock::new(radar::RadarSnapshot::default()),
+            token_usage_cache_path,
+            token_usage_lock: Mutex::new(()),
         }
     }
 }
@@ -132,6 +138,18 @@ async fn refresh_radar(
 }
 
 #[tauri::command]
+async fn get_token_usage(
+    state: State<'_, Arc<AppState>>,
+) -> Result<token_usage::TokenUsageSnapshot, String> {
+    let _guard = state.token_usage_lock.lock().await;
+    let codex_home = state.settings.read().await.codex_home_path();
+    let cache_path = state.token_usage_cache_path.clone();
+    tokio::task::spawn_blocking(move || token_usage::scan(&codex_home, &cache_path))
+        .await
+        .map_err(|error| format!("Token 统计任务异常结束: {error}"))?
+}
+
+#[tauri::command]
 async fn get_settings(state: State<'_, Arc<AppState>>) -> Result<AppSettings, String> {
     Ok(state.settings.read().await.clone())
 }
@@ -143,6 +161,9 @@ async fn save_settings(
     settings: AppSettings,
 ) -> Result<AppSettings, String> {
     let settings = settings.normalized();
+    // Keep the persisted setting and the Windows Run registration in sync.
+    // Applying it first avoids saving a state that Windows rejected.
+    apply_autostart(&app, settings.autostart)?;
     settings::save(&state.settings_path, &settings)?;
     *state.settings.write().await = settings.clone();
     taskbar::position_widget(&app, &settings)?;
@@ -154,14 +175,18 @@ async fn save_settings(
     Ok(settings)
 }
 
-#[tauri::command]
-fn set_autostart(app: AppHandle, enabled: bool) -> Result<(), String> {
+fn apply_autostart(app: &AppHandle, enabled: bool) -> Result<(), String> {
     if enabled {
         app.autolaunch().enable()
     } else {
         app.autolaunch().disable()
     }
     .map_err(|e| format!("无法更新开机启动设置: {e}"))
+}
+
+#[tauri::command]
+fn set_autostart(app: AppHandle, enabled: bool) -> Result<(), String> {
+    apply_autostart(&app, enabled)
 }
 
 #[tauri::command]
@@ -548,10 +573,11 @@ pub fn run() {
         ))
         .setup(|app| {
             let settings_path = app.path().app_config_dir()?.join("settings.json");
+            let token_usage_cache_path = app.path().app_cache_dir()?.join("token-usage-cache.json");
             let settings = settings::load(&settings_path).normalized();
-            if settings.autostart {
-                let _ = app.handle().autolaunch().enable();
-            }
+            // Reconcile both directions on launch. Older builds only enabled this
+            // entry, so a disabled setting could leave a stale registration behind.
+            let _ = apply_autostart(app.handle(), settings.autostart);
             let quota = QuotaService::new().map_err(std::io::Error::other)?;
             let radar = radar::RadarService::new().map_err(std::io::Error::other)?;
             let state = Arc::new(AppState::new(
@@ -560,6 +586,7 @@ pub fn run() {
                 settings_path,
                 app.package_info().version.to_string(),
                 radar,
+                token_usage_cache_path,
             ));
             app.manage(state.clone());
             taskbar::position_widget(app.handle(), &settings).ok();
@@ -601,6 +628,7 @@ pub fn run() {
             refresh_now,
             get_radar_status,
             refresh_radar,
+            get_token_usage,
             get_settings,
             save_settings,
             set_autostart,

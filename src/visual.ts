@@ -21,6 +21,29 @@ export function findWindow(windows: QuotaWindow[], kind: WindowKind): QuotaWindo
   return windows.find((window) => window.kind === kind);
 }
 
+export function ringProgress(percent: number) {
+  // The UI presents whole percentages. Use that same value for the arc so a
+  // displayed 100% is closed and a displayed 0% has no residual round cap.
+  const value = Math.round(Math.max(0, Math.min(100, Number.isFinite(percent) ? percent : 0)));
+  return {
+    value,
+    empty: value <= 0,
+    full: value >= 100,
+    dashOffset: 100 - value,
+  };
+}
+
+export function ringGeometry(percent: number, radius: number) {
+  const progress = ringProgress(percent);
+  const circumference = Math.PI * 2 * Math.max(0, radius);
+  return {
+    ...progress,
+    circumference,
+    visibleLength: circumference * progress.value / 100,
+    dashOffset: circumference * (1 - progress.value / 100),
+  };
+}
+
 export function formatCountdown(resetAt?: number, compact = false, now = Date.now()): string {
   if (!resetAt) return "--:--";
   const total = Math.max(0, Math.floor((resetAt - now) / 1000));

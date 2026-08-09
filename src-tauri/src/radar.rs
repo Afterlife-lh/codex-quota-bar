@@ -5,7 +5,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const PUBLIC_RADAR_URL: &str = "https://codexradar.com/current.json";
 const PUBLIC_RATINGS_URL: &str = "https://codexradar.com/api/model-ratings";
-const PUBLIC_RADAR_PAGE_URL: &str = "https://codexradar.com/";
+const PUBLIC_METRICS_URL: &str = "https://codexradar.com/api/intelligence-efficiency-metrics";
 
 #[derive(Debug, Clone, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -14,7 +14,6 @@ pub struct RadarSnapshot {
     pub quota_rows: Vec<RadarQuotaRow>,
     pub status: Option<String>,
     pub signal: Option<String>,
-    pub reset_signals: Vec<RadarResetSignal>,
     pub batch: Option<String>,
     pub quota_batch: Option<String>,
     pub updated_at: Option<String>,
@@ -24,13 +23,6 @@ pub struct RadarSnapshot {
     pub site_url: String,
     pub cached: bool,
     pub error: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct RadarResetSignal {
-    pub label: String,
-    pub headline: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -67,17 +59,22 @@ impl RadarService {
 
     pub async fn refresh(&self, previous: &RadarSnapshot) -> RadarSnapshot {
         let summary = self.fetch_json(PUBLIC_RADAR_URL);
+        let metrics = self.fetch_json(PUBLIC_METRICS_URL);
         let ratings = self.fetch_json(PUBLIC_RATINGS_URL);
-        let page = self.fetch_text(PUBLIC_RADAR_PAGE_URL);
-        let (result, ratings, page) = tokio::join!(summary, ratings, page);
+        let (result, metrics, ratings) = tokio::join!(summary, metrics, ratings);
         match result {
             Ok(value) => match parse_summary(&value, now_millis()) {
                 Ok(mut snapshot) => {
+                    if let Ok(value) = metrics {
+                        if let Ok((models, updated_at)) = parse_metrics(&value) {
+                            if !models.is_empty() {
+                                snapshot.models = models;
+                                snapshot.batch = updated_at;
+                            }
+                        }
+                    }
                     if let Ok(value) = ratings {
                         apply_ratings(&mut snapshot, &value);
-                    }
-                    if let Ok(html) = page {
-                        snapshot.reset_signals = parse_reset_signals(&html);
                     }
                     snapshot
                 }
@@ -101,76 +98,6 @@ impl RadarService {
             .await
             .map_err(|error| format!("Radar 响应无法解析：{error}"))
     }
-
-    async fn fetch_text(&self, url: &str) -> Result<String, String> {
-        crate::network::client(Duration::from_secs(12))?
-            .get(url)
-            .header("Accept", "text/html")
-            .header("User-Agent", "codex-quota-bar/0.11")
-            .header("Cache-Control", "no-cache")
-            .send()
-            .await
-            .and_then(|response| response.error_for_status())
-            .map_err(|error| safe_error(&error))?
-            .text()
-            .await
-            .map_err(|error| format!("Radar 页面无法解析：{error}"))
-    }
-}
-
-fn strip_html(value: &str) -> String {
-    let mut output = String::new();
-    let mut in_tag = false;
-    for character in value.chars() {
-        match character {
-            '<' => in_tag = true,
-            '>' => in_tag = false,
-            _ if !in_tag => output.push(character),
-            _ => {}
-        }
-    }
-    output
-        .replace("&amp;", "&")
-        .replace("&middot;", "·")
-        .replace("&nbsp;", " ")
-        .trim()
-        .to_string()
-}
-
-fn element_text(fragment: &str, tag: &str) -> Option<String> {
-    let start = fragment.find(&format!("<{tag}"))?;
-    let content = fragment[start..].find('>')? + start + 1;
-    let end = fragment[content..].find(&format!("</{tag}>"))? + content;
-    let value = strip_html(&fragment[content..end]);
-    (!value.is_empty()).then_some(value)
-}
-
-fn parse_reset_signals(html: &str) -> Vec<RadarResetSignal> {
-    let Some(section_start) = html.find("reset-judgement-grid") else {
-        return Vec::new();
-    };
-    let section = &html[section_start..];
-    let mut cursor = 0;
-    let mut signals = Vec::new();
-    while signals.len() < 2 {
-        let Some(article_start) = section[cursor..].find("<article") else {
-            break;
-        };
-        let article_start = cursor + article_start;
-        let Some(article_end) = section[article_start..].find("</article>") else {
-            break;
-        };
-        let article_end = article_start + article_end + "</article>".len();
-        let article = &section[article_start..article_end];
-        if let (Some(label), Some(headline)) = (
-            element_text(article, "span"),
-            element_text(article, "strong"),
-        ) {
-            signals.push(RadarResetSignal { label, headline });
-        }
-        cursor = article_end;
-    }
-    signals
 }
 
 fn parse_model(id: String, label: String, value: &Value) -> RadarModel {
@@ -216,23 +143,85 @@ fn model_sort_key(model: &RadarModel) -> (u8, u8, String) {
         1
     } else if id.contains("-luna-") {
         2
-    } else {
+    } else if id.starts_with("gpt-5.5-") {
         3
-    };
-    let effort = if id.ends_with("-max") {
-        0
-    } else if id.ends_with("-xhigh") {
-        1
-    } else if id.ends_with("-high") {
-        2
-    } else if id.ends_with("-medium") {
-        3
-    } else if id.ends_with("-low") {
+    } else if id.starts_with("deepseek-v4-") {
         4
     } else {
         5
     };
+    let effort = if id.ends_with("-ultra") {
+        0
+    } else if id.ends_with("-max") {
+        1
+    } else if id.ends_with("-xhigh") {
+        2
+    } else if id.ends_with("-high") {
+        3
+    } else if id.ends_with("-medium") {
+        4
+    } else if id.ends_with("-low") {
+        5
+    } else {
+        6
+    };
     (family, effort, id)
+}
+
+fn parse_metrics(root: &Value) -> Result<(Vec<RadarModel>, Option<String>), String> {
+    let points = root
+        .get("points")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "缺少 intelligence efficiency points".to_string())?;
+    let mut models = points
+        .iter()
+        .filter_map(|point| {
+            let model = text(point, "model")?;
+            let effort = text(point, "effort")?;
+            let id = format!(
+                "{}-{}",
+                model.to_ascii_lowercase(),
+                effort.to_ascii_lowercase()
+            );
+            let family = match model.as_str() {
+                "gpt-5.6-sol" => "GPT-5.6 Sol".to_string(),
+                "gpt-5.6-terra" => "GPT-5.6 Terra".to_string(),
+                "gpt-5.6-luna" => "GPT-5.6 Luna".to_string(),
+                "gpt-5.5" => "GPT-5.5".to_string(),
+                "deepseek-v4-flash" => "DeepSeek V4 Flash".to_string(),
+                _ => model.clone(),
+            };
+            let minutes = point.get("average_minutes").and_then(Value::as_f64);
+            Some(RadarModel {
+                id,
+                label: format!("{family} {effort}"),
+                score: point.get("iq").and_then(Value::as_f64),
+                status: None,
+                passed: point
+                    .get("weighted_passed")
+                    .and_then(Value::as_f64)
+                    .map(|value| value.round() as i64),
+                valid_tasks: point
+                    .get("weighted_total")
+                    .and_then(Value::as_f64)
+                    .map(|value| value.round() as i64),
+                invalid_tasks: None,
+                wall_time: minutes.map(|value| {
+                    if (value - value.round()).abs() < 0.05 {
+                        format!("{value:.0}分钟")
+                    } else {
+                        format!("{value:.1}分钟")
+                    }
+                }),
+                cost_usd: point.get("average_price_usd").and_then(Value::as_f64),
+                community_score: None,
+                community_votes: None,
+            })
+        })
+        .collect::<Vec<_>>();
+    models.sort_by_key(model_sort_key);
+    models.dedup_by(|left, right| left.id.eq_ignore_ascii_case(&right.id));
+    Ok((models, text(root, "source_updated_at")))
 }
 
 #[derive(Debug, Deserialize)]
@@ -317,7 +306,6 @@ fn parse_summary(root: &Value, fetched_at: i64) -> Result<RadarSnapshot, String>
             .or_else(|| root.pointer("/window/message").and_then(Value::as_str))
             .or_else(|| root.pointer("/prediction/summary").and_then(Value::as_str))
             .map(str::to_string),
-        reset_signals: Vec::new(),
         batch: model_iq.get("latest").and_then(|v| text(v, "date")),
         quota_batch: quota.and_then(|v| text(v, "date")),
         updated_at: quota
@@ -409,6 +397,27 @@ mod tests {
     }
 
     #[test]
+    fn parses_complete_metrics_families_and_reference_values() {
+        let value = serde_json::json!({
+            "source_updated_at": "2026-08-09T08:00:00Z",
+            "points": [
+                {"model":"deepseek-v4-flash","effort":"max","iq":101.5,"average_price_usd":1.2,"average_minutes":12.4,"weighted_passed":8.1,"weighted_total":10.0},
+                {"model":"gpt-5.5","effort":"xhigh","iq":118.0,"average_price_usd":4.5,"average_minutes":28.0,"weighted_passed":9.0,"weighted_total":10.0},
+                {"model":"gpt-5.6-luna","effort":"medium","iq":92.0,"average_price_usd":2.1,"average_minutes":18.0,"weighted_passed":7.0,"weighted_total":10.0},
+                {"model":"gpt-5.6-terra","effort":"low","iq":88.0,"average_price_usd":1.8,"average_minutes":15.0,"weighted_passed":6.0,"weighted_total":10.0},
+                {"model":"gpt-5.6-sol","effort":"ultra","iq":140.0,"average_price_usd":9.4,"average_minutes":37.0,"weighted_passed":9.5,"weighted_total":10.0}
+            ]
+        });
+        let (models, updated_at) = parse_metrics(&value).unwrap();
+        assert_eq!(updated_at.as_deref(), Some("2026-08-09T08:00:00Z"));
+        assert_eq!(models.len(), 5);
+        assert_eq!(models[0].id, "gpt-5.6-sol-ultra");
+        assert_eq!(models[0].cost_usd, Some(9.4));
+        assert_eq!(models[0].wall_time.as_deref(), Some("37分钟"));
+        assert_eq!(models[4].id, "deepseek-v4-flash-max");
+    }
+
+    #[test]
     fn sorts_known_families_and_efforts_in_site_order() {
         let mut models = [
             ("gpt-5.6-luna-medium", "Luna medium"),
@@ -430,27 +439,6 @@ mod tests {
                 "gpt-5.6-sol-low",
                 "gpt-5.6-terra-xhigh",
                 "gpt-5.6-luna-medium"
-            ]
-        );
-    }
-
-    #[test]
-    fn parses_live_reset_judgement_cards() {
-        let html = r#"<section class="reset-judgement"><div class="reset-judgement-grid">
-          <article><span>发重置卡</span><strong>官方已宣布 · 50 万已发、明日全量</strong></article>
-          <article><span>硬重置</span><strong>刚落地 · 短期再重置概率低</strong></article>
-        </div></section>"#;
-        assert_eq!(
-            parse_reset_signals(html),
-            vec![
-                RadarResetSignal {
-                    label: "发重置卡".into(),
-                    headline: "官方已宣布 · 50 万已发、明日全量".into()
-                },
-                RadarResetSignal {
-                    label: "硬重置".into(),
-                    headline: "刚落地 · 短期再重置概率低".into()
-                },
             ]
         );
     }

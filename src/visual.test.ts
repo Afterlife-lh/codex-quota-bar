@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatCountdown, quotaColor } from "./visual";
+import { formatCountdown, quotaColor, ringGeometry, ringProgress } from "./visual";
 
 describe("quotaColor", () => {
   it("uses the exact dark anchors", () => {
@@ -11,6 +11,27 @@ describe("quotaColor", () => {
   it("clamps values", () => {
     expect(quotaColor(-5, false)).toBe("#c62828");
     expect(quotaColor(105, false)).toBe("#147a3f");
+  });
+});
+
+describe("ringProgress", () => {
+  it("handles exact empty and full rings without SVG dash seams", () => {
+    expect(ringProgress(0)).toEqual({ value: 0, empty: true, full: false, dashOffset: 100 });
+    expect(ringProgress(100)).toEqual({ value: 100, empty: false, full: true, dashOffset: 0 });
+  });
+
+  it("clamps values and builds a normalized partial arc", () => {
+    expect(ringProgress(64).dashOffset).toBe(36);
+    expect(ringProgress(99.6).full).toBe(true);
+    expect(ringProgress(0.4).empty).toBe(true);
+    expect(ringProgress(-1).empty).toBe(true);
+    expect(ringProgress(101).full).toBe(true);
+  });
+
+  it("maps 74 percent to exactly 74 percent of the real circumference", () => {
+    const geometry = ringGeometry(74, 11.7);
+    expect(geometry.visibleLength / geometry.circumference).toBeCloseTo(.74, 12);
+    expect(geometry.dashOffset / geometry.circumference).toBeCloseTo(.26, 12);
   });
 });
 

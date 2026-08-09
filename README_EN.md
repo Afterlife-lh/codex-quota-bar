@@ -54,6 +54,17 @@ Installing a newer MSI upgrades an existing installation.
 
 ## Changelog
 
+### 0.15.2
+
+- Added complete local Token usage statistics for today, the last 7 days, the last 30 days, all history, and every conversation and project.
+- Recent usage is reconstructed from rollout JSONL `token_count` deltas with a file-level incremental cache. Conversation statistics prefer the latest Codex-generated title and include a short thread ID to distinguish genuinely duplicated names.
+- Added a seven-natural-day Token trend chart with a peak-derived Y axis, clearer dates, and exact per-day usage details on hover.
+- Made the Token heading reuse the exact structure, reveal animation, and pointer interaction of the Model Radar heading, including after asynchronous data loading.
+- Radar now loads the complete intelligence-efficiency dataset dynamically, currently covering all 21 available Sol, Terra, Luna, GPT-5.5, and DeepSeek V4 Flash tiers with reference price, reference duration, and community ratings.
+- Streamlined Radar by removing reset-time statistics and the standalone 24-hour rating row while preserving community ratings inside model cards.
+- Autostart settings are now reconciled bidirectionally with the current-user Windows startup registration, including cleanup of stale entries left by older builds.
+- Fixed quota-ring proportions at 0%, 100%, and intermediate values. Each ring now uses its real `2πr` circumference, starts at 12 o'clock, and depletes counter-clockwise; a displayed 74% therefore retains exactly 74% of its center-line circumference.
+
 ### 0.13.1
 
 - Fixed the quota widget being pushed behind Explorer and never recovering after a taskbar application was activated.
