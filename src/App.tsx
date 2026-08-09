@@ -4,12 +4,12 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { flushSync } from "react-dom";
 import {
-  Activity, AlertCircle, Check, CheckCircle2, Clock3, Download, Folder,
-  Gauge, LogOut, Moon, Palette, RadioTower, RefreshCw, Settings2, ShieldCheck, Sparkles, Sun, X,
+  Activity, AlertCircle, CalendarDays, Check, CheckCircle2, Clock3, Database, Download, Folder,
+  Gauge, History, LogOut, MessageSquare, Moon, Palette, RadioTower, RefreshCw, Settings2, ShieldCheck, Sparkles, Sun, X,
 } from "lucide-react";
 import type { AppSettings, QuotaSnapshot, QuotaWindow } from "./types";
 import { EMPTY_SNAPSHOT, normalizeSettings } from "./types";
-import { findWindow, formatCountdown, quotaColor, statusText } from "./visual";
+import { findWindow, formatCountdown, quotaColor, ringGeometry, statusText } from "./visual";
 
 interface UpdateStatus {
   state: "idle" | "checking" | "up_to_date" | "available" | "downloading" | "installing" | "error";
@@ -21,8 +21,21 @@ interface UpdateStatus {
 interface RadarSnapshot {
   models: Array<{ id: string; label: string; score?: number; status?: string; passed?: number; validTasks?: number; invalidTasks?: number; wallTime?: string; costUsd?: number; communityScore?: number; communityVotes?: number }>;
   quotaRows: Array<{ tier: string; fiveHour?: number; sevenDay?: number; basis?: string }>;
-  status?: string; signal?: string; resetSignals?: Array<{ label: string; headline: string }>; batch?: string; quotaBatch?: string; updatedAt?: string;
+  status?: string; signal?: string; batch?: string; quotaBatch?: string; updatedAt?: string;
   fetchedAt?: number; source: string; attribution: string; siteUrl: string; cached: boolean; error?: string;
+}
+
+interface TokenUsageSnapshot {
+  todayTokens: number;
+  weekTokens: number;
+  monthTokens: number;
+  totalTokens: number;
+  dailyTrend: Array<{ date: string; label: string; tokens: number }>;
+  scannedAt: number;
+  sourceFiles: number;
+  error?: string;
+  conversations: Array<{ id: string; title: string; project: string; projectPath: string; totalTokens: number; updatedAt: number; archived: boolean }>;
+  projects: Array<{ name: string; path: string; totalTokens: number; conversationCount: number; updatedAt: number }>;
 }
 
 function useQuota() {
@@ -102,11 +115,12 @@ function DualRing({ five, seven, size = 28, stroke = 2.3, dark, animated = true 
   const outerR = size / 2 - stroke;
   const innerR = outerR * 0.61;
   const circle = (radius: number, percent: number, color: string, key: string) => {
-    const length = Math.PI * 2 * radius;
+    const progress = ringGeometry(percent, radius);
     return <>
       <circle key={`${key}-track`} cx={center} cy={center} r={radius} className="ring-track" strokeWidth={stroke} />
       <circle key={key} cx={center} cy={center} r={radius} fill="none" stroke={color} strokeWidth={stroke}
-        strokeLinecap="round" strokeDasharray={length} strokeDashoffset={length * (1 - percent / 100)}
+        strokeLinecap={progress.full ? "butt" : "round"} strokeDasharray={`${progress.circumference} ${progress.circumference}`}
+        strokeDashoffset={progress.dashOffset} opacity={progress.empty ? 0 : 1}
         className={animated ? "ring-value animated" : "ring-value"} />
     </>;
   };
@@ -181,8 +195,8 @@ function UpdateBadge({ status }: { status: UpdateStatus }) {
   </span>;
 }
 
-const CURRENT_CHANGELOG = "修复点击任务按钮后任务栏额度组件被 Explorer 遮挡且无法恢复的问题；使用低频 Z 顺序保活兼顾可靠显示与低 CPU 占用。包含 v0.13.0 的 Radar 平均价格/耗时修正和轮询率设置。";
-const CURRENT_RELEASE_DATE = "2026-07-20";
+const CURRENT_CHANGELOG = "新增本地 Token 日/周/月/历史总量、对话与项目统计，以及带纵轴和精确悬停数据的七日趋势图。\nRadar 动态覆盖 Sol、Terra、Luna、GPT-5.5 与 DeepSeek V4 Flash 全部可用档位。\n开机启动与 Windows 注册项双向同步；额度圆环改用实际 2πr 周长，使 0%、100% 和中间百分比严格对应。";
+const CURRENT_RELEASE_DATE = "2026-08-09";
 
 function UpdatePanel({ status, onRefresh, refreshing }: { status: UpdateStatus; onRefresh: () => void; refreshing: boolean }) {
   const available = status.state === "available";
@@ -209,7 +223,7 @@ function DetailView() {
   const update = useUpdateStatus();
   const radar = useRadar();
   const settings = useSettings();
-  const [detailTab, setDetailTab] = useState<"quota" | "radar">("quota");
+  const [detailTab, setDetailTab] = useState<"quota" | "radar" | "tokens">("quota");
   const [refreshing, setRefreshing] = useState(false);
   const [windowCycle, setWindowCycle] = useState(0);
   const [windowPhase, setWindowPhase] = useState<"entering" | "visible" | "leaving">("entering");
@@ -263,11 +277,13 @@ function DetailView() {
   }, [closeAnimated]);
   useEffect(() => {
     const root = document.querySelector(".detail-content");
-    const elements = root?.querySelectorAll<HTMLElement>("[data-reveal]");
-    if (!elements?.length) return;
+    if (!root) return;
     if (!("IntersectionObserver" in window)) {
-      elements.forEach((element) => element.classList.add("is-revealed"));
-      return;
+      const revealAll = () => root.querySelectorAll<HTMLElement>("[data-reveal]").forEach((element) => element.classList.add("is-revealed"));
+      revealAll();
+      const mutations = new MutationObserver(revealAll);
+      mutations.observe(root, { childList: true, subtree: true });
+      return () => mutations.disconnect();
     }
     const observer = new IntersectionObserver((entries) => entries.forEach((entry) => {
       if (entry.isIntersecting) {
@@ -275,8 +291,11 @@ function DetailView() {
         observer.unobserve(entry.target);
       }
     }), { root, threshold: 0.14 });
-    elements.forEach((element) => observer.observe(element));
-    return () => observer.disconnect();
+    const observePending = () => root.querySelectorAll<HTMLElement>("[data-reveal]:not(.is-revealed)").forEach((element) => observer.observe(element));
+    observePending();
+    const mutations = new MutationObserver(observePending);
+    mutations.observe(root, { childList: true, subtree: true });
+    return () => { mutations.disconnect(); observer.disconnect(); };
   }, [detailTab, radar.models.length, snapshot.windows.length, update.state, windowCycle]);
   const toggleTheme = (event: MouseEvent<HTMLButtonElement>) => {
     if (themeTransitionActive.current) return;
@@ -311,9 +330,10 @@ function DetailView() {
     <WindowHeader title="Codex Quota Bar" subtitle="额度中心" icon={<Sparkles size={15} />} onClose={closeAnimated}
       actions={<button className="soft-icon-button theme-button" disabled={themeTransitioning} aria-label={dark ? "切换为亮色主题" : "切换为暗色主题"} title={dark ? "切换为亮色主题" : "切换为暗色主题"} onClick={toggleTheme}>{dark ? <Moon size={16} /> : <Sun size={16} />}</button>} />
     <nav className="detail-tabs"><button className={detailTab === "quota" ? "is-active" : ""} onClick={() => setDetailTab("quota")}><Gauge size={13} />额度</button>
-      {settings?.radarEnabled !== false && <button className={detailTab === "radar" ? "is-active" : ""} onClick={() => setDetailTab("radar")}><RadioTower size={13} />Codex Radar</button>}</nav>
+      {settings?.radarEnabled !== false && <button className={detailTab === "radar" ? "is-active" : ""} onClick={() => setDetailTab("radar")}><RadioTower size={13} />Radar</button>}
+      <button className={detailTab === "tokens" ? "is-active" : ""} onClick={() => setDetailTab("tokens")}><Database size={13} />Token</button></nav>
     <div className="soft-scroll detail-content">
-      {detailTab === "radar" && settings?.radarEnabled !== false ? <RadarView radar={radar} /> : <>
+      {detailTab === "radar" && settings?.radarEnabled !== false ? <RadarView radar={radar} /> : detailTab === "tokens" ? <TokenUsageView /> : <>
       <section className="soft-card hero-card interactive-surface" data-reveal onMouseMove={trackPointer} onMouseLeave={resetPointer}>
         <div className="hero-ring"><DualRing five={five} seven={seven} size={92} stroke={6.5} dark={dark} /></div>
         <div className="hero-copy"><span className="eyebrow"><Activity size={12} /> 当前可用额度</span>
@@ -354,8 +374,6 @@ function RadarView({ radar }: { radar: RadarSnapshot }) {
     <section className="soft-card radar-heading interactive-surface" data-reveal onMouseMove={trackPointer} onMouseLeave={resetPointer}><div><span className={`radar-live ${radar.status ?? ""}`} /><div><strong>模型能力雷达</strong><small>{radar.batch ?? "等待数据"} · Public</small></div></div>
       <button className="soft-icon-button" title="刷新 Radar" onClick={refresh}><RefreshCw size={15} className={refreshing ? "spin" : ""} /></button></section>
     {radar.error && <div className="soft-alert"><AlertCircle size={14} />{radar.error}{radar.cached ? "（显示缓存）" : ""}</div>}
-    {radar.resetSignals?.length ? <div className="radar-reset-signals" data-reveal>{radar.resetSignals.map((item) => <div key={item.label}><span>{item.label}</span><strong>{item.headline}</strong></div>)}</div>
-      : radar.signal && <div className="radar-signal" data-reveal><RadioTower size={14} /><span>{radar.signal}</span></div>}
     <div className="radar-model-grid">{radar.models.length ? radar.models.map((model) => <article className="soft-card radar-model interactive-surface" data-reveal key={model.id} style={{ "--radar-color": radarColor(model.score) } as CSSProperties} onMouseMove={trackPointer} onMouseLeave={resetPointer}>
       <strong className="radar-model-name">{model.label}</strong>
       <div className="radar-iq"><small>IQ 分数</small><strong>{model.score?.toFixed(1) ?? "--"}</strong></div>
@@ -363,6 +381,109 @@ function RadarView({ radar }: { radar: RadarSnapshot }) {
       <div className="radar-reference"><span><small>参考价格</small><strong>{formatRadarCost(model.costUsd)}</strong></span><span><small>参考时间</small><strong>{model.wallTime ?? "--"}</strong></span></div>
     </article>) : <div className="radar-empty">暂无模型评分，点击刷新重试</div>}</div>
     <footer className="radar-footer" data-reveal><span>{radar.attribution}</span><span>{radar.updatedAt ? new Date(radar.updatedAt).toLocaleString("zh-CN") : "尚未更新"}</span></footer>
+  </div>;
+}
+
+function formatTokens(value: number) {
+  if (value >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(value >= 10_000_000_000 ? 1 : 2)}B`;
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(value >= 100_000_000 ? 1 : 2)}M`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(value >= 100_000 ? 1 : 2)}K`;
+  return value.toLocaleString("zh-CN");
+}
+
+function tokenAxisMaximum(value: number) {
+  if (value <= 0) return 1;
+  const magnitude = 10 ** Math.floor(Math.log10(value));
+  const normalized = value / magnitude;
+  const step = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10;
+  return step * magnitude;
+}
+
+function TokenTrendChart({ data }: { data: TokenUsageSnapshot["dailyTrend"] }) {
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+  const width = 460;
+  const height = 170;
+  const padding = { left: 55, right: 12, top: 20, bottom: 33 };
+  const max = tokenAxisMaximum(Math.max(0, ...data.map((item) => item.tokens)));
+  const usableWidth = width - padding.left - padding.right;
+  const usableHeight = height - padding.top - padding.bottom;
+  const points = data.map((item, index) => ({
+    ...item,
+    x: padding.left + (data.length <= 1 ? usableWidth / 2 : index * usableWidth / (data.length - 1)),
+    y: padding.top + usableHeight * (1 - item.tokens / max),
+  }));
+  const line = points.map((point) => `${point.x},${point.y}`).join(" ");
+  const area = points.length ? `M ${points[0].x} ${height - padding.bottom} L ${points.map((point) => `${point.x} ${point.y}`).join(" L ")} L ${points[points.length - 1].x} ${height - padding.bottom} Z` : "";
+  const ticks = [1, .75, .5, .25, 0].map((ratio) => ({ ratio, value: Math.round(max * ratio), y: padding.top + usableHeight * (1 - ratio) }));
+  const hovered = hoveredIndex === null ? undefined : points[hoveredIndex];
+  return <section className="soft-card token-trend interactive-surface" onMouseMove={trackPointer} onMouseLeave={resetPointer}>
+    <header><span><Activity size={10} />过去 7 天使用趋势</span><small>按本地自然日统计</small></header>
+    <div className="token-trend-plot" onMouseLeave={() => setHoveredIndex(null)}>
+      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="过去七天 Token 使用趋势折线图">
+        <defs><linearGradient id="token-trend-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="var(--accent)" stopOpacity=".28" /><stop offset="1" stopColor="var(--accent)" stopOpacity="0" /></linearGradient></defs>
+        {ticks.map((tick) => <g key={tick.ratio}><line x1={padding.left} x2={width - padding.right} y1={tick.y} y2={tick.y} className="token-trend-gridline" />
+          <line x1={padding.left - 4} x2={padding.left} y1={tick.y} y2={tick.y} className="token-trend-axis" />
+          <text x={padding.left - 8} y={tick.y + 3.5} textAnchor="end" className="token-trend-axis-label">{formatTokens(tick.value)}</text></g>)}
+        <line x1={padding.left} x2={padding.left} y1={padding.top} y2={height - padding.bottom} className="token-trend-axis" />
+        {area && <path d={area} fill="url(#token-trend-fill)" className="token-trend-area" />}
+        {line && <polyline points={line} className="token-trend-line" pathLength={1} />}
+        {hovered && <line x1={hovered.x} x2={hovered.x} y1={padding.top} y2={height - padding.bottom} className="token-trend-hover-line" />}
+        {points.map((point, index) => <g key={point.date}><circle cx={point.x} cy={point.y} r={hoveredIndex === index ? 5 : 3.5} className={`token-trend-point ${hoveredIndex === index ? "is-hovered" : ""}`} />
+          <text x={point.x} y={height - 8} textAnchor="middle" className="token-trend-date">{point.label}</text></g>)}
+        {points.map((point, index) => {
+          const left = index === 0 ? padding.left : (points[index - 1].x + point.x) / 2;
+          const right = index === points.length - 1 ? width - padding.right : (point.x + points[index + 1].x) / 2;
+          return <rect key={`hit-${point.date}`} x={left} y={padding.top} width={right - left} height={usableHeight} className="token-trend-hit" onMouseEnter={() => setHoveredIndex(index)} />;
+        })}
+      </svg>
+      {hovered && <div className={`token-trend-tooltip ${hoveredIndex === points.length - 1 ? "is-last" : ""}`} style={{ left: `${hovered.x / width * 100}%` }}>
+        <strong>{hovered.tokens.toLocaleString("zh-CN")} tokens</strong><small>{hovered.date}</small>
+      </div>}
+    </div>
+  </section>;
+}
+
+function TokenUsageView() {
+  const [usage, setUsage] = useState<TokenUsageSnapshot>();
+  const [loading, setLoading] = useState(true);
+  const [view, setView] = useState<"conversations" | "projects">("conversations");
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    try { setUsage(await invoke<TokenUsageSnapshot>("get_token_usage")); }
+    finally { setLoading(false); }
+  }, []);
+  useEffect(() => { void refresh(); }, [refresh]);
+
+  if (!usage && loading) return <div className="token-loading"><RefreshCw size={18} className="spin" /><strong>正在整理本地 Token 记录</strong><small>首次扫描会读取历史会话，后续仅处理新增内容。</small></div>;
+  if (!usage) return <div className="soft-alert"><AlertCircle size={14} />无法读取本地 Token 统计</div>;
+
+  const periods = [
+    { label: "今日", value: usage.todayTokens, icon: <CalendarDays size={14} /> },
+    { label: "近 7 日", value: usage.weekTokens, icon: <Activity size={14} /> },
+    { label: "近 30 日", value: usage.monthTokens, icon: <History size={14} /> },
+    { label: "历史总量", value: usage.totalTokens, icon: <Database size={14} /> },
+  ];
+  return <div className="token-panel">
+    <section className="soft-card radar-heading token-heading interactive-surface" data-reveal onMouseMove={trackPointer} onMouseLeave={resetPointer}><div><span className="radar-live" /><div><strong>Token 消耗统计</strong><small>本地对话与项目记录</small></div></div>
+      <button className="soft-icon-button" title="刷新 Token 统计" disabled={loading} onClick={refresh}><RefreshCw size={15} className={loading ? "spin" : ""} /></button></section>
+    {usage.error && <div className="soft-alert"><AlertCircle size={14} />{usage.error}</div>}
+    <div className="token-period-grid">{periods.map((period) => <article className="soft-card token-period interactive-surface" key={period.label} onMouseMove={trackPointer} onMouseLeave={resetPointer}>
+      <span>{period.icon}{period.label}</span><strong title={period.value.toLocaleString("zh-CN")}>{formatTokens(period.value)}</strong><small>tokens</small>
+    </article>)}</div>
+    <TokenTrendChart data={usage.dailyTrend ?? []} />
+    <div className="token-list-switch"><button className={view === "conversations" ? "is-active" : ""} onClick={() => setView("conversations")}><MessageSquare size={13} />对话</button>
+      <button className={view === "projects" ? "is-active" : ""} onClick={() => setView("projects")}><Folder size={13} />项目</button></div>
+    <section className="soft-card token-list">
+      {view === "conversations" ? usage.conversations.map((item) => <article className="token-list-row" key={item.id}>
+        <span className="token-row-icon"><MessageSquare size={14} /></span><div><strong title={item.title}>{item.title}</strong><small title={`${item.projectPath} · ${item.id}`}>{item.project}{item.archived ? " · 已归档" : ""} · #{item.id.slice(0, 8)} · {new Date(item.updatedAt).toLocaleDateString("zh-CN")}</small></div>
+        <b title={`${item.totalTokens.toLocaleString("zh-CN")} tokens`}>{formatTokens(item.totalTokens)}</b>
+      </article>) : usage.projects.map((item) => <article className="token-list-row" key={item.path}>
+        <span className="token-row-icon"><Folder size={14} /></span><div><strong title={item.path}>{item.name}</strong><small>{item.conversationCount} 个对话 · {new Date(item.updatedAt).toLocaleDateString("zh-CN")}</small></div>
+        <b title={`${item.totalTokens.toLocaleString("zh-CN")} tokens`}>{formatTokens(item.totalTokens)}</b>
+      </article>)}
+      {((view === "conversations" && usage.conversations.length === 0) || (view === "projects" && usage.projects.length === 0)) && <div className="token-empty">尚未找到可统计的本地记录</div>}
+    </section>
+    <footer className="token-footer"><span>{usage.sourceFiles} 个本地记录文件</span><span>{new Date(usage.scannedAt).toLocaleString("zh-CN")}</span></footer>
   </div>;
 }
 
@@ -379,7 +500,6 @@ function SettingsPanel({ value, onSaved }: { value: AppSettings; onSaved: (next:
   useEffect(() => { void invoke<"windows10" | "windows11">("get_windows_generation").then(setWindowsGeneration); }, []);
   const save = async () => {
     const saved = await invoke<AppSettings>("save_settings", { settings: draft });
-    await invoke("set_autostart", { enabled: saved.autostart });
     onSaved(saved); setSavedFlash(true); window.setTimeout(() => setSavedFlash(false), 1400);
   };
   const checkUpdate = () => invoke("check_for_updates");
