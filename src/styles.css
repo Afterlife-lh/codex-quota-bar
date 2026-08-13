@@ -147,6 +147,7 @@ html[data-detail-theme="dark"]::view-transition-new(root) { z-index: 1; }
 
 /* Codex Radar */
 .radar-panel { padding-top: 3px; }
+.radar-render-error { margin: 3px 0 12px; }
 .radar-heading { min-height: 58px; padding: 11px 14px; display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
 .radar-heading > div { display: flex; align-items: center; gap: 9px; }
 .radar-heading > div > div { display: flex; flex-direction: column; gap: 2px; }

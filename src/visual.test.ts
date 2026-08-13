@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatCountdown, quotaColor, ringGeometry, ringProgress } from "./visual";
+import { formatCountdown, formatRadarCost, formatRadarScore, quotaColor, radarColor, ringGeometry, ringProgress } from "./visual";
 
 describe("quotaColor", () => {
   it("uses the exact dark anchors", () => {
@@ -40,5 +40,21 @@ describe("formatCountdown", () => {
     const now = 1_000_000;
     expect(formatCountdown(now + 3_661_000, true, now)).toBe("1h1m");
     expect(formatCountdown(now + 2 * 86_400_000 + 4 * 3_600_000, true, now)).toBe("2d4h");
+  });
+});
+
+describe("Radar metric formatting", () => {
+  it("renders upstream null and invalid numeric values as unavailable", () => {
+    expect(formatRadarScore(null)).toBe("--");
+    expect(formatRadarScore(Number.NaN)).toBe("--");
+    expect(formatRadarCost(null)).toBe("--");
+    expect(formatRadarCost(Number.POSITIVE_INFINITY)).toBe("--");
+    expect(radarColor(null)).toBe("#8c96a8");
+  });
+
+  it("keeps valid scores and costs formatted consistently", () => {
+    expect(formatRadarScore(101.45)).toBe("101.5");
+    expect(formatRadarCost(9.406)).toBe("$9.4");
+    expect(formatRadarCost(105.2)).toBe("$105");
   });
 });

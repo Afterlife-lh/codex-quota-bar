@@ -147,8 +147,10 @@ fn model_sort_key(model: &RadarModel) -> (u8, u8, String) {
         3
     } else if id.starts_with("deepseek-v4-") {
         4
-    } else {
+    } else if id.starts_with("grok-4.5-") {
         5
+    } else {
+        6
     };
     let effort = if id.ends_with("-ultra") {
         0
@@ -189,6 +191,8 @@ fn parse_metrics(root: &Value) -> Result<(Vec<RadarModel>, Option<String>), Stri
                 "gpt-5.6-luna" => "GPT-5.6 Luna".to_string(),
                 "gpt-5.5" => "GPT-5.5".to_string(),
                 "deepseek-v4-flash" => "DeepSeek V4 Flash".to_string(),
+                "deepseek-v4-pro" => "DeepSeek V4 Pro".to_string(),
+                "grok-4.5" => "Grok 4.5".to_string(),
                 _ => model.clone(),
             };
             let minutes = point.get("average_minutes").and_then(Value::as_f64);

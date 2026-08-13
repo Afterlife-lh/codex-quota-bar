@@ -498,14 +498,14 @@ fn spawn_radar_background(app: AppHandle, state: Arc<AppState>) {
     });
 }
 
-fn auth_stamp(settings: &AppSettings) -> Option<(u64, u64)> {
+fn auth_stamp(settings: &AppSettings) -> Option<(u128, u64)> {
     let metadata = std::fs::metadata(quota::auth_path(settings)).ok()?;
     let modified = metadata
         .modified()
         .ok()?
         .duration_since(UNIX_EPOCH)
         .ok()?
-        .as_secs();
+        .as_nanos();
     Some((modified, metadata.len()))
 }
 
