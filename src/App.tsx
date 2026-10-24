@@ -10,6 +10,7 @@ import {
 import type { AppSettings, QuotaSnapshot, QuotaWindow } from "./types";
 import { EMPTY_SNAPSHOT, normalizeSettings } from "./types";
 import { findWindow, formatCountdown, formatRadarCost, formatRadarScore, quotaColor, radarColor, ringGeometry, statusText } from "./visual";
+import { startActiveInterval, useWindowActive } from "./windowActivity";
 
 interface UpdateStatus {
   state: "idle" | "checking" | "up_to_date" | "available" | "downloading" | "installing" | "error";
@@ -44,8 +45,8 @@ function useQuota() {
   useEffect(() => {
     invoke<QuotaSnapshot>("get_status").then(setSnapshot).catch(() => undefined);
     const unlisten = listen<QuotaSnapshot>("quota-updated", (event) => setSnapshot(event.payload));
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => { window.clearInterval(timer); void unlisten.then((fn) => fn()); };
+    const stopClock = startActiveInterval(() => setNow(Date.now()), 1000);
+    return () => { stopClock(); void unlisten.then((fn) => fn()); };
   }, []);
   return { snapshot, now };
 }
@@ -195,8 +196,8 @@ function UpdateBadge({ status }: { status: UpdateStatus }) {
   </span>;
 }
 
-const CURRENT_CHANGELOG = "修复 Codex Radar 官网新增空值模型数据后的渲染问题，缺失的 IQ、社区评分、价格或时间现在统一显示为 --。\n兼容 Cockpit Tools 切回官方账号后写入的无 auth_mode OAuth 凭据，同时继续拒绝 API Key 服务商凭据。\n补充 DeepSeek V4 Pro 与 Grok 4.5 的动态模型名称，并提高登录态变动检测精度。";
-const CURRENT_RELEASE_DATE = "2026-08-13";
+const CURRENT_CHANGELOG = "大幅降低cpu、gpu占用率";
+const CURRENT_RELEASE_DATE = "2026-10-24";
 
 function UpdatePanel({ status, onRefresh, refreshing }: { status: UpdateStatus; onRefresh: () => void; refreshing: boolean }) {
   const available = status.state === "available";
@@ -237,6 +238,7 @@ class RadarErrorBoundary extends Component<{ children: ReactNode; resetKey: stri
 }
 
 function DetailView() {
+  const active = useWindowActive();
   const { snapshot, now } = useQuota();
   const systemDark = useDarkTheme();
   const [themeOverride, setThemeOverride] = useState<"light" | "dark" | null>(() => {
@@ -255,6 +257,7 @@ function DetailView() {
   const [themeTransitioning, setThemeTransitioning] = useState(false);
   const themeTransitionActive = useRef(false);
   const closeTimer = useRef<number>();
+  const entryTimer = useRef<number>();
   const closing = useRef(false);
   const hasFocused = useRef(false);
   const five = findWindow(snapshot.windows, "five_hour");
@@ -279,9 +282,10 @@ function DetailView() {
       hasFocused.current = true;
       closing.current = false;
       window.clearTimeout(closeTimer.current);
+      window.clearTimeout(entryTimer.current);
       setWindowCycle((value) => value + 1);
       setWindowPhase("entering");
-      window.setTimeout(() => setWindowPhase("visible"), 360);
+      entryTimer.current = window.setTimeout(() => setWindowPhase("visible"), 360);
     };
     const focusListener = current.onFocusChanged(({ payload }) => {
       if (payload) {
@@ -295,12 +299,22 @@ function DetailView() {
     const closeListener = listen("request-detail-close", closeAnimated);
     return () => {
       window.clearTimeout(closeTimer.current);
+      window.clearTimeout(entryTimer.current);
       void focusListener.then((unlisten) => unlisten());
       void prepareListener.then((unlisten) => unlisten());
       void closeListener.then((unlisten) => unlisten());
     };
   }, [closeAnimated]);
   useEffect(() => {
+    if (active) return;
+    window.clearTimeout(closeTimer.current);
+    window.clearTimeout(entryTimer.current);
+    hasFocused.current = false;
+    closing.current = false;
+    setWindowPhase("entering");
+  }, [active]);
+  useEffect(() => {
+    if (!active) return;
     const root = document.querySelector(".detail-content");
     if (!root) return;
     if (!("IntersectionObserver" in window)) {
@@ -321,7 +335,7 @@ function DetailView() {
     const mutations = new MutationObserver(observePending);
     mutations.observe(root, { childList: true, subtree: true });
     return () => { mutations.disconnect(); observer.disconnect(); };
-  }, [detailTab, radar.models.length, snapshot.windows.length, update.state, windowCycle]);
+  }, [active, detailTab, radar.models.length, snapshot.windows.length, update.state, windowCycle]);
   const toggleTheme = (event: MouseEvent<HTMLButtonElement>) => {
     if (themeTransitionActive.current) return;
     const next = dark ? "light" : "dark";
@@ -504,15 +518,23 @@ function Section({ icon, title, children }: { icon: ReactNode; title: string; ch
 }
 
 function SettingsPanel({ value, onSaved }: { value: AppSettings; onSaved: (next: AppSettings) => void }) {
+  const active = useWindowActive();
   const [draft, setDraft] = useState(value);
   const [savedFlash, setSavedFlash] = useState(false);
+  const savedFlashTimer = useRef<number>();
   const [windowsGeneration, setWindowsGeneration] = useState<"windows10" | "windows11">("windows11");
   const update = useUpdateStatus();
   useEffect(() => setDraft(value), [value]);
   useEffect(() => { void invoke<"windows10" | "windows11">("get_windows_generation").then(setWindowsGeneration); }, []);
+  useEffect(() => {
+    if (!active) setSavedFlash(false);
+    return () => window.clearTimeout(savedFlashTimer.current);
+  }, [active]);
   const save = async () => {
     const saved = await invoke<AppSettings>("save_settings", { settings: draft });
-    onSaved(saved); setSavedFlash(true); window.setTimeout(() => setSavedFlash(false), 1400);
+    onSaved(saved); setSavedFlash(true);
+    window.clearTimeout(savedFlashTimer.current);
+    savedFlashTimer.current = window.setTimeout(() => setSavedFlash(false), 1400);
   };
   const checkUpdate = () => invoke("check_for_updates");
   const installUpdate = () => invoke("install_update");

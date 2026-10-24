@@ -626,6 +626,7 @@ pub fn show_widget(app: &AppHandle, settings: &AppSettings) -> Result<(), String
         .get_webview_window("taskbar")
         .ok_or("taskbar window missing")?;
     let hwnd = window.hwnd().map_err(|error| error.to_string())?;
+    crate::window_activity::set_active(&window, true);
     platform::show_widget(hwnd.0);
     Ok(())
 }
@@ -652,14 +653,14 @@ pub fn show_detail(app: &AppHandle) -> Result<(), String> {
     detail
         .set_position(Position::Physical(PhysicalPosition::new(x, y.max(8))))
         .map_err(|e| e.to_string())?;
+    crate::window_activity::set_active(&detail, true);
     app.emit_to("detail", "prepare-detail-show", ())
         .map_err(|e| e.to_string())?;
     let detail_for_show = detail.clone();
     tauri::async_runtime::spawn(async move {
         // Let the hidden WebView apply its entering state before Windows paints it.
         tokio::time::sleep(std::time::Duration::from_millis(34)).await;
-        let _ = detail_for_show
-            .show()
+        let _ = crate::window_activity::show(&detail_for_show)
             .and_then(|_| detail_for_show.set_focus());
     });
     Ok(())
@@ -687,8 +688,7 @@ pub fn show_settings(app: &AppHandle) -> Result<(), String> {
     settings
         .set_position(Position::Physical(PhysicalPosition::new(x, y.max(8))))
         .map_err(|e| e.to_string())?;
-    settings
-        .show()
+    crate::window_activity::show(&settings)
         .and_then(|_| settings.set_focus())
         .map_err(|e| e.to_string())
 }
@@ -712,7 +712,7 @@ pub fn show_menu(app: &AppHandle) -> Result<(), String> {
         menu_y.max(8),
     )))
     .map_err(|e| e.to_string())?;
-    menu.show()
+    crate::window_activity::show(&menu)
         .and_then(|_| menu.set_focus())
         .map_err(|e| e.to_string())
 }
@@ -756,10 +756,11 @@ pub fn spawn_reposition_loop(app: AppHandle, state: std::sync::Arc<crate::AppSta
         loop {
             if platform::should_hide_widget() {
                 if !suppressed {
+                    crate::window_activity::set_active(&window, false);
                     platform::hide_widget(hwnd as _);
                     for label in ["detail", "menu", "settings"] {
                         if let Some(auxiliary) = app.get_webview_window(label) {
-                            let _ = auxiliary.hide();
+                            let _ = crate::window_activity::hide(&auxiliary);
                         }
                     }
                 }
@@ -816,10 +817,10 @@ pub fn spawn_reposition_loop(app: AppHandle, state: std::sync::Arc<crate::AppSta
                     platform::move_widget(hwnd as _, x, y);
                     last_applied_position = Some((x, y));
                 }
-                let animating = settings.animations
-                    && progress < 1.0
-                    && animation_from != (target.x, target.y);
+                let animating =
+                    settings.animations && progress < 1.0 && animation_from != (target.x, target.y);
                 if !shown {
+                    crate::window_activity::set_active(&window, true);
                     platform::show_widget(hwnd as _);
                     shown = true;
                 } else if !animating {

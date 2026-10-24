@@ -54,7 +54,11 @@ Installing a newer MSI upgrades an existing installation.
 
 ## Changelog
 
-### 0.15.3 (local test build)
+### 0.15.4
+
+- Greatly reduced CPU and GPU usage.
+
+### 0.15.3
 
 - Fixed the detail view disappearing when the Codex Radar feed contains newly added models with null metrics. Missing IQ, community rating, price, and duration values now render as `--`.
 - Added a Radar-specific error boundary so future upstream data issues show a recoverable message instead of blanking the whole detail window.

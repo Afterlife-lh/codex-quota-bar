@@ -8,6 +8,7 @@ mod token_usage;
 mod updater;
 #[cfg(test)]
 mod visual;
+mod window_activity;
 
 use models::QuotaSnapshot;
 use quota::QuotaService;
@@ -191,7 +192,9 @@ fn set_autostart(app: AppHandle, enabled: bool) -> Result<(), String> {
 
 #[tauri::command]
 fn show_detail(app: AppHandle) -> Result<(), String> {
-    let _ = app.get_webview_window("menu").map(|w| w.hide());
+    let _ = app
+        .get_webview_window("menu")
+        .map(|window| window_activity::hide(&window));
     taskbar::show_detail(&app)
 }
 
@@ -406,7 +409,12 @@ async fn install_update(
 
 #[tauri::command]
 fn hide_current_window(window: tauri::WebviewWindow) -> Result<(), String> {
-    window.hide().map_err(|e| e.to_string())
+    window_activity::hide(&window).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_window_activity(window: tauri::WebviewWindow) -> Result<bool, String> {
+    window.is_visible().map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -598,9 +606,13 @@ pub fn run() {
             Ok(())
         })
         .on_page_load(|webview, payload| {
-            if webview.label() != "taskbar"
-                || payload.event() != tauri::webview::PageLoadEvent::Finished
-            {
+            if payload.event() != tauri::webview::PageLoadEvent::Finished {
+                return;
+            }
+            if let Some(window) = webview.app_handle().get_webview_window(webview.label()) {
+                window_activity::set_active(&window, window.is_visible().unwrap_or(false));
+            }
+            if webview.label() != "taskbar" {
                 return;
             }
             let app = webview.app_handle().clone();
@@ -615,11 +627,17 @@ pub fn run() {
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
-                let _ = window.hide();
+                if let Some(webview) = window.app_handle().get_webview_window(window.label()) {
+                    let _ = window_activity::hide(&webview);
+                } else {
+                    let _ = window.hide();
+                }
             }
             if let tauri::WindowEvent::Focused(false) = event {
                 if window.label() == "menu" {
-                    let _ = window.hide();
+                    if let Some(webview) = window.app_handle().get_webview_window(window.label()) {
+                        let _ = window_activity::hide(&webview);
+                    }
                 }
             }
         })
@@ -641,6 +659,7 @@ pub fn run() {
             check_for_updates,
             install_update,
             hide_current_window,
+            get_window_activity,
             quit_app
         ])
         .run(tauri::generate_context!())
