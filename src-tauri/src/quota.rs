@@ -4,6 +4,7 @@ use crate::{
 };
 use reqwest::StatusCode;
 use serde::Deserialize;
+use serde_json::Value;
 use std::{
     fs,
     path::PathBuf,
@@ -16,8 +17,10 @@ const USAGE_URL: &str = "https://chatgpt.com/backend-api/wham/usage";
 #[derive(Debug, Deserialize)]
 struct AuthFile {
     auth_mode: Option<String>,
+    #[serde(rename = "OPENAI_API_KEY")]
+    openai_api_key: Option<Value>,
     tokens: Option<AuthTokens>,
-    last_refresh: Option<String>,
+    last_refresh: Option<Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -161,9 +164,32 @@ fn read_credentials(settings: &AppSettings) -> Result<Credentials, QueryError> {
             QueryError::Parse(error.to_string())
         }
     })?;
-    let auth: AuthFile =
-        serde_json::from_str(&raw).map_err(|e| QueryError::Parse(e.to_string()))?;
-    if auth.auth_mode.as_deref() != Some("chatgpt") {
+    parse_credentials(&raw)
+}
+
+fn parse_credentials(raw: &str) -> Result<Credentials, QueryError> {
+    let auth: AuthFile = serde_json::from_str(raw).map_err(|e| QueryError::Parse(e.to_string()))?;
+    let mode = auth
+        .auth_mode
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let has_access_token = auth
+        .tokens
+        .as_ref()
+        .and_then(|tokens| tokens.access_token.as_deref())
+        .is_some_and(|token| !token.trim().is_empty());
+    let has_api_key = auth.openai_api_key.as_ref().is_some_and(non_empty_api_key);
+
+    // Codex itself traditionally writes auth_mode="chatgpt". Cockpit Tools
+    // deliberately omits auth_mode for OAuth accounts while preserving the
+    // complete token set, and uses an explicit "apikey" mode for providers.
+    // Accept that unambiguous OAuth shape without ever accepting API-key mode.
+    let official_oauth = match mode {
+        Some(value) => value.eq_ignore_ascii_case("chatgpt"),
+        None => has_access_token && !has_api_key,
+    };
+    if !official_oauth {
         return Err(QueryError::NotFound);
     }
     let tokens = auth
@@ -175,19 +201,36 @@ fn read_credentials(settings: &AppSettings) -> Result<Credentials, QueryError> {
         .ok_or_else(|| QueryError::Parse("缺少 access_token".into()))?;
     let stale = auth
         .last_refresh
-        .as_deref()
-        .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
-        .is_some_and(|date| {
-            chrono::Utc::now()
-                .signed_duration_since(date.with_timezone(&chrono::Utc))
-                .num_days()
-                > 8
-        });
+        .as_ref()
+        .and_then(parse_last_refresh)
+        .is_some_and(|date| chrono::Utc::now().signed_duration_since(date).num_days() > 8);
     Ok(Credentials {
         access_token,
         account_id: tokens.account_id.filter(|id| !id.trim().is_empty()),
         stale,
     })
+}
+
+fn non_empty_api_key(value: &Value) -> bool {
+    match value.as_str() {
+        Some(value) => !value.trim().is_empty(),
+        None => true,
+    }
+}
+
+fn parse_last_refresh(value: &Value) -> Option<chrono::DateTime<chrono::Utc>> {
+    if let Some(text) = value.as_str() {
+        return chrono::DateTime::parse_from_rfc3339(text)
+            .ok()
+            .map(|date| date.with_timezone(&chrono::Utc));
+    }
+    let timestamp = value.as_i64()?;
+    let seconds = if timestamp.unsigned_abs() > 10_000_000_000 {
+        timestamp / 1000
+    } else {
+        timestamp
+    };
+    chrono::DateTime::from_timestamp(seconds, 0)
 }
 
 fn to_quota_window(window: RateLimitWindow) -> Option<QuotaWindow> {
@@ -308,6 +351,42 @@ mod tests {
             reset_at: None
         })
         .is_none());
+    }
+
+    #[test]
+    fn accepts_native_chatgpt_credentials() {
+        let credentials = parse_credentials(
+            r#"{"auth_mode":"chatgpt","tokens":{"access_token":"oauth-token","account_id":"account"},"last_refresh":"2026-08-13T00:00:00Z"}"#,
+        )
+        .unwrap();
+        assert_eq!(credentials.access_token, "oauth-token");
+        assert_eq!(credentials.account_id.as_deref(), Some("account"));
+    }
+
+    #[test]
+    fn accepts_cockpit_oauth_credentials_without_auth_mode() {
+        let credentials = parse_credentials(
+            r#"{"OPENAI_API_KEY":null,"tokens":{"access_token":"oauth-token","account_id":"account"},"last_refresh":1786550400000}"#,
+        )
+        .unwrap();
+        assert_eq!(credentials.access_token, "oauth-token");
+        assert_eq!(credentials.account_id.as_deref(), Some("account"));
+    }
+
+    #[test]
+    fn rejects_cockpit_api_key_provider_credentials() {
+        let result = parse_credentials(
+            r#"{"auth_mode":"apikey","OPENAI_API_KEY":"provider-key","tokens":{"access_token":"old-token"}}"#,
+        );
+        assert!(matches!(result, Err(QueryError::NotFound)));
+    }
+
+    #[test]
+    fn rejects_ambiguous_missing_mode_with_api_key() {
+        let result = parse_credentials(
+            r#"{"OPENAI_API_KEY":"provider-key","tokens":{"access_token":"old-token"}}"#,
+        );
+        assert!(matches!(result, Err(QueryError::NotFound)));
     }
 
     fn snapshot(five_remaining: f64, reset_at: i64) -> QuotaSnapshot {

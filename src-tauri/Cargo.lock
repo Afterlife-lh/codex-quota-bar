@@ -492,7 +492,7 @@ dependencies = [
 
 [[package]]
 name = "codex-quota-bar"
-version = "0.15.2"
+version = "0.15.4"
 dependencies = [
  "chrono",
  "dirs 5.0.1",

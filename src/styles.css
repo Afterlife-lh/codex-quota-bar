@@ -147,6 +147,7 @@ html[data-detail-theme="dark"]::view-transition-new(root) { z-index: 1; }
 
 /* Codex Radar */
 .radar-panel { padding-top: 3px; }
+.radar-render-error { margin: 3px 0 12px; }
 .radar-heading { min-height: 58px; padding: 11px 14px; display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
 .radar-heading > div { display: flex; align-items: center; gap: 9px; }
 .radar-heading > div > div { display: flex; flex-direction: column; gap: 2px; }
@@ -272,6 +273,14 @@ html[data-detail-theme="dark"]::view-transition-new(root) { z-index: 1; }
 .detail-content [data-reveal] { opacity: 0; transform: translateY(16px) scale(.985); transition: opacity 420ms cubic-bezier(.2,.8,.2,1) var(--reveal-delay,0ms), transform 420ms cubic-bezier(.2,.8,.2,1) var(--reveal-delay,0ms); }
 .detail-content [data-reveal].is-revealed { opacity: 1; transform: none; }
 .detail-content [data-reveal].interactive-surface.is-revealed:hover { transform: perspective(700px) rotateX(var(--tilt-x)) rotateY(var(--tilt-y)) translateY(-3px); }
+
+/* Native visibility is authoritative for transparent WebView2 windows. */
+html[data-window-active="false"] *,
+html[data-window-active="false"] *::before,
+html[data-window-active="false"] *::after {
+  animation-play-state: paused !important;
+  transition: none !important;
+}
 
 .spin { animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }

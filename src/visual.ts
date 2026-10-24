@@ -62,3 +62,26 @@ export function statusText(status: string): string {
   if (status === "not_found") return "未登录";
   return "暂不可用";
 }
+
+export type RadarMetricValue = number | null | undefined;
+
+function finiteRadarMetric(value: RadarMetricValue): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+export function radarColor(score: RadarMetricValue): string {
+  if (!finiteRadarMetric(score)) return "#8c96a8";
+  if (score >= 110) return "#43c98a";
+  if (score >= 90) return "#7289ff";
+  if (score >= 60) return "#e5ae36";
+  return "#ef6670";
+}
+
+export function formatRadarScore(value: RadarMetricValue): string {
+  return finiteRadarMetric(value) ? value.toFixed(1) : "--";
+}
+
+export function formatRadarCost(value: RadarMetricValue): string {
+  if (!finiteRadarMetric(value)) return "--";
+  return `$${value >= 100 ? value.toFixed(0) : value.toFixed(1)}`;
+}

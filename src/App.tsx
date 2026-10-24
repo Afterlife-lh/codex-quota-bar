@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
+import { Component, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ErrorInfo, type MouseEvent, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -9,7 +9,8 @@ import {
 } from "lucide-react";
 import type { AppSettings, QuotaSnapshot, QuotaWindow } from "./types";
 import { EMPTY_SNAPSHOT, normalizeSettings } from "./types";
-import { findWindow, formatCountdown, quotaColor, ringGeometry, statusText } from "./visual";
+import { findWindow, formatCountdown, formatRadarCost, formatRadarScore, quotaColor, radarColor, ringGeometry, statusText } from "./visual";
+import { startActiveInterval, useWindowActive } from "./windowActivity";
 
 interface UpdateStatus {
   state: "idle" | "checking" | "up_to_date" | "available" | "downloading" | "installing" | "error";
@@ -19,7 +20,7 @@ interface UpdateStatus {
 }
 
 interface RadarSnapshot {
-  models: Array<{ id: string; label: string; score?: number; status?: string; passed?: number; validTasks?: number; invalidTasks?: number; wallTime?: string; costUsd?: number; communityScore?: number; communityVotes?: number }>;
+  models: Array<{ id: string; label: string; score?: number | null; status?: string; passed?: number | null; validTasks?: number | null; invalidTasks?: number | null; wallTime?: string | null; costUsd?: number | null; communityScore?: number | null; communityVotes?: number | null }>;
   quotaRows: Array<{ tier: string; fiveHour?: number; sevenDay?: number; basis?: string }>;
   status?: string; signal?: string; batch?: string; quotaBatch?: string; updatedAt?: string;
   fetchedAt?: number; source: string; attribution: string; siteUrl: string; cached: boolean; error?: string;
@@ -44,8 +45,8 @@ function useQuota() {
   useEffect(() => {
     invoke<QuotaSnapshot>("get_status").then(setSnapshot).catch(() => undefined);
     const unlisten = listen<QuotaSnapshot>("quota-updated", (event) => setSnapshot(event.payload));
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => { window.clearInterval(timer); void unlisten.then((fn) => fn()); };
+    const stopClock = startActiveInterval(() => setNow(Date.now()), 1000);
+    return () => { stopClock(); void unlisten.then((fn) => fn()); };
   }, []);
   return { snapshot, now };
 }
@@ -195,8 +196,8 @@ function UpdateBadge({ status }: { status: UpdateStatus }) {
   </span>;
 }
 
-const CURRENT_CHANGELOG = "新增本地 Token 日/周/月/历史总量、对话与项目统计，以及带纵轴和精确悬停数据的七日趋势图。\nRadar 动态覆盖 Sol、Terra、Luna、GPT-5.5 与 DeepSeek V4 Flash 全部可用档位。\n开机启动与 Windows 注册项双向同步；额度圆环改用实际 2πr 周长，使 0%、100% 和中间百分比严格对应。";
-const CURRENT_RELEASE_DATE = "2026-08-09";
+const CURRENT_CHANGELOG = "大幅降低cpu、gpu占用率";
+const CURRENT_RELEASE_DATE = "2026-10-24";
 
 function UpdatePanel({ status, onRefresh, refreshing }: { status: UpdateStatus; onRefresh: () => void; refreshing: boolean }) {
   const available = status.state === "available";
@@ -211,7 +212,33 @@ function UpdatePanel({ status, onRefresh, refreshing }: { status: UpdateStatus; 
   </section>;
 }
 
+class RadarErrorBoundary extends Component<{ children: ReactNode; resetKey: string }, { failed: boolean }> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error("Radar rendering failed", error.name, error.message, info.componentStack);
+  }
+
+  componentDidUpdate(previous: Readonly<{ children: ReactNode; resetKey: string }>) {
+    if (this.state.failed && previous.resetKey !== this.props.resetKey) {
+      this.setState({ failed: false });
+    }
+  }
+
+  render() {
+    if (this.state.failed) {
+      return <div className="soft-alert radar-render-error"><AlertCircle size={14} />Radar 数据暂时无法显示，请点击刷新后重试。</div>;
+    }
+    return this.props.children;
+  }
+}
+
 function DetailView() {
+  const active = useWindowActive();
   const { snapshot, now } = useQuota();
   const systemDark = useDarkTheme();
   const [themeOverride, setThemeOverride] = useState<"light" | "dark" | null>(() => {
@@ -230,6 +257,7 @@ function DetailView() {
   const [themeTransitioning, setThemeTransitioning] = useState(false);
   const themeTransitionActive = useRef(false);
   const closeTimer = useRef<number>();
+  const entryTimer = useRef<number>();
   const closing = useRef(false);
   const hasFocused = useRef(false);
   const five = findWindow(snapshot.windows, "five_hour");
@@ -254,9 +282,10 @@ function DetailView() {
       hasFocused.current = true;
       closing.current = false;
       window.clearTimeout(closeTimer.current);
+      window.clearTimeout(entryTimer.current);
       setWindowCycle((value) => value + 1);
       setWindowPhase("entering");
-      window.setTimeout(() => setWindowPhase("visible"), 360);
+      entryTimer.current = window.setTimeout(() => setWindowPhase("visible"), 360);
     };
     const focusListener = current.onFocusChanged(({ payload }) => {
       if (payload) {
@@ -270,12 +299,22 @@ function DetailView() {
     const closeListener = listen("request-detail-close", closeAnimated);
     return () => {
       window.clearTimeout(closeTimer.current);
+      window.clearTimeout(entryTimer.current);
       void focusListener.then((unlisten) => unlisten());
       void prepareListener.then((unlisten) => unlisten());
       void closeListener.then((unlisten) => unlisten());
     };
   }, [closeAnimated]);
   useEffect(() => {
+    if (active) return;
+    window.clearTimeout(closeTimer.current);
+    window.clearTimeout(entryTimer.current);
+    hasFocused.current = false;
+    closing.current = false;
+    setWindowPhase("entering");
+  }, [active]);
+  useEffect(() => {
+    if (!active) return;
     const root = document.querySelector(".detail-content");
     if (!root) return;
     if (!("IntersectionObserver" in window)) {
@@ -296,7 +335,7 @@ function DetailView() {
     const mutations = new MutationObserver(observePending);
     mutations.observe(root, { childList: true, subtree: true });
     return () => { mutations.disconnect(); observer.disconnect(); };
-  }, [detailTab, radar.models.length, snapshot.windows.length, update.state, windowCycle]);
+  }, [active, detailTab, radar.models.length, snapshot.windows.length, update.state, windowCycle]);
   const toggleTheme = (event: MouseEvent<HTMLButtonElement>) => {
     if (themeTransitionActive.current) return;
     const next = dark ? "light" : "dark";
@@ -333,7 +372,7 @@ function DetailView() {
       {settings?.radarEnabled !== false && <button className={detailTab === "radar" ? "is-active" : ""} onClick={() => setDetailTab("radar")}><RadioTower size={13} />Radar</button>}
       <button className={detailTab === "tokens" ? "is-active" : ""} onClick={() => setDetailTab("tokens")}><Database size={13} />Token</button></nav>
     <div className="soft-scroll detail-content">
-      {detailTab === "radar" && settings?.radarEnabled !== false ? <RadarView radar={radar} /> : detailTab === "tokens" ? <TokenUsageView /> : <>
+      {detailTab === "radar" && settings?.radarEnabled !== false ? <RadarErrorBoundary resetKey={`${radar.fetchedAt ?? 0}:${radar.models.length}:${radar.cached}`}><RadarView radar={radar} /></RadarErrorBoundary> : detailTab === "tokens" ? <TokenUsageView /> : <>
       <section className="soft-card hero-card interactive-surface" data-reveal onMouseMove={trackPointer} onMouseLeave={resetPointer}>
         <div className="hero-ring"><DualRing five={five} seven={seven} size={92} stroke={6.5} dark={dark} /></div>
         <div className="hero-copy"><span className="eyebrow"><Activity size={12} /> 当前可用额度</span>
@@ -354,19 +393,6 @@ function DetailView() {
   </main>;
 }
 
-function radarColor(score?: number) {
-  if (score === undefined) return "#8c96a8";
-  if (score >= 110) return "#43c98a";
-  if (score >= 90) return "#7289ff";
-  if (score >= 60) return "#e5ae36";
-  return "#ef6670";
-}
-
-function formatRadarCost(value?: number) {
-  if (value === undefined) return "--";
-  return `$${value >= 100 ? value.toFixed(0) : value.toFixed(1)}`;
-}
-
 function RadarView({ radar }: { radar: RadarSnapshot }) {
   const [refreshing, setRefreshing] = useState(false);
   const refresh = async () => { setRefreshing(true); try { await invoke("refresh_radar"); } finally { setRefreshing(false); } };
@@ -376,8 +402,8 @@ function RadarView({ radar }: { radar: RadarSnapshot }) {
     {radar.error && <div className="soft-alert"><AlertCircle size={14} />{radar.error}{radar.cached ? "（显示缓存）" : ""}</div>}
     <div className="radar-model-grid">{radar.models.length ? radar.models.map((model) => <article className="soft-card radar-model interactive-surface" data-reveal key={model.id} style={{ "--radar-color": radarColor(model.score) } as CSSProperties} onMouseMove={trackPointer} onMouseLeave={resetPointer}>
       <strong className="radar-model-name">{model.label}</strong>
-      <div className="radar-iq"><small>IQ 分数</small><strong>{model.score?.toFixed(1) ?? "--"}</strong></div>
-      <div className="radar-community"><span>社区体感</span><strong>{model.communityScore?.toFixed(1) ?? "--"}</strong></div>
+      <div className="radar-iq"><small>IQ 分数</small><strong>{formatRadarScore(model.score)}</strong></div>
+      <div className="radar-community"><span>社区体感</span><strong>{formatRadarScore(model.communityScore)}</strong></div>
       <div className="radar-reference"><span><small>参考价格</small><strong>{formatRadarCost(model.costUsd)}</strong></span><span><small>参考时间</small><strong>{model.wallTime ?? "--"}</strong></span></div>
     </article>) : <div className="radar-empty">暂无模型评分，点击刷新重试</div>}</div>
     <footer className="radar-footer" data-reveal><span>{radar.attribution}</span><span>{radar.updatedAt ? new Date(radar.updatedAt).toLocaleString("zh-CN") : "尚未更新"}</span></footer>
@@ -492,15 +518,23 @@ function Section({ icon, title, children }: { icon: ReactNode; title: string; ch
 }
 
 function SettingsPanel({ value, onSaved }: { value: AppSettings; onSaved: (next: AppSettings) => void }) {
+  const active = useWindowActive();
   const [draft, setDraft] = useState(value);
   const [savedFlash, setSavedFlash] = useState(false);
+  const savedFlashTimer = useRef<number>();
   const [windowsGeneration, setWindowsGeneration] = useState<"windows10" | "windows11">("windows11");
   const update = useUpdateStatus();
   useEffect(() => setDraft(value), [value]);
   useEffect(() => { void invoke<"windows10" | "windows11">("get_windows_generation").then(setWindowsGeneration); }, []);
+  useEffect(() => {
+    if (!active) setSavedFlash(false);
+    return () => window.clearTimeout(savedFlashTimer.current);
+  }, [active]);
   const save = async () => {
     const saved = await invoke<AppSettings>("save_settings", { settings: draft });
-    onSaved(saved); setSavedFlash(true); window.setTimeout(() => setSavedFlash(false), 1400);
+    onSaved(saved); setSavedFlash(true);
+    window.clearTimeout(savedFlashTimer.current);
+    savedFlashTimer.current = window.setTimeout(() => setSavedFlash(false), 1400);
   };
   const checkUpdate = () => invoke("check_for_updates");
   const installUpdate = () => invoke("install_update");

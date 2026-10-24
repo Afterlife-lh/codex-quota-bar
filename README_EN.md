@@ -30,7 +30,7 @@ beside the notification area.
 - Windows 10 tray-left placement and Windows 11 left/right region and alignment controls.
 - Reversible ring/quota/countdown layout.
 - Smooth repositioning when task or notification icons change.
-- Optional Lyricify Lite collision avoidance (`lyrics → quota → tray`).
+- Lyricify Lite collision avoidance is always enabled (`lyrics → quota → tray`).
 - Read-only Codex authentication and no independent OAuth flow.
 
 ## Install
@@ -49,10 +49,22 @@ Installing a newer MSI upgrades an existing installation.
   layer and may change without notice.
 - The app targets the unmodified primary Windows taskbar. Tools such as
   ExplorerPatcher and StartAllBack are not supported.
-- Lyricify Lite coordination is enabled by default and can be disabled in the
-  appearance settings if another taskbar customization tool controls layout.
+- Lyricify Lite coordination is always enabled so the widget can preserve the
+  `lyrics → quota → tray` layout when Lyricify Lite is running.
 
 ## Changelog
+
+### 0.15.4
+
+- Greatly reduced CPU and GPU usage.
+
+### 0.15.3
+
+- Fixed the detail view disappearing when the Codex Radar feed contains newly added models with null metrics. Missing IQ, community rating, price, and duration values now render as `--`.
+- Added a Radar-specific error boundary so future upstream data issues show a recoverable message instead of blanking the whole detail window.
+- Added support for the official OAuth credential shape written by Cockpit Tools after switching back from another provider, while continuing to reject API-key provider credentials.
+- Increased `auth.json` change detection from second to nanosecond precision to avoid missing rapid provider switches.
+- Added friendly dynamic labels for DeepSeek V4 Pro and Grok 4.5.
 
 ### 0.15.2
 
