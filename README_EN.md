@@ -54,6 +54,10 @@ Installing a newer MSI upgrades an existing installation.
 
 ## Changelog
 
+### 0.15.5
+
+- Redesigned the Codex Radar page to make model intelligence scores more intuitive.
+
 ### 0.15.4
 
 - Greatly reduced CPU and GPU usage.

@@ -11,19 +11,13 @@ import type { AppSettings, QuotaSnapshot, QuotaWindow } from "./types";
 import { EMPTY_SNAPSHOT, normalizeSettings } from "./types";
 import { findWindow, formatCountdown, formatRadarCost, formatRadarScore, quotaColor, radarColor, ringGeometry, statusText } from "./visual";
 import { startActiveInterval, useWindowActive } from "./windowActivity";
+import { groupRadarModels, radarCostTitle, radarScoreLabel, type RadarSnapshot } from "./radar";
 
 interface UpdateStatus {
   state: "idle" | "checking" | "up_to_date" | "available" | "downloading" | "installing" | "error";
   currentVersion: string;
   availableVersion?: string;
   message?: string;
-}
-
-interface RadarSnapshot {
-  models: Array<{ id: string; label: string; score?: number | null; status?: string; passed?: number | null; validTasks?: number | null; invalidTasks?: number | null; wallTime?: string | null; costUsd?: number | null; communityScore?: number | null; communityVotes?: number | null }>;
-  quotaRows: Array<{ tier: string; fiveHour?: number; sevenDay?: number; basis?: string }>;
-  status?: string; signal?: string; batch?: string; quotaBatch?: string; updatedAt?: string;
-  fetchedAt?: number; source: string; attribution: string; siteUrl: string; cached: boolean; error?: string;
 }
 
 interface TokenUsageSnapshot {
@@ -72,7 +66,7 @@ function useUpdateStatus() {
 }
 
 function useRadar() {
-  const [radar, setRadar] = useState<RadarSnapshot>({ models: [], quotaRows: [], source: "public_summary", attribution: "数据来自 Codex 雷达 codexradar.com", siteUrl: "https://codexradar.com", cached: false });
+  const [radar, setRadar] = useState<RadarSnapshot>({ models: [], source: "degradation_codex", attribution: "数据来自 Codex 雷达 codexradar.com", siteUrl: "https://codexradar.com/#stationmaster-round", cached: false });
   useEffect(() => {
     invoke<RadarSnapshot>("get_radar_status").then(setRadar).catch(() => undefined);
     const unlisten = listen<RadarSnapshot>("radar-updated", (event) => setRadar(event.payload));
@@ -92,15 +86,15 @@ function useDarkTheme(followSystem = true) {
   return followSystem ? dark : true;
 }
 
-function trackPointer(event: MouseEvent<HTMLElement>) {
+function trackPointer(event: MouseEvent<HTMLElement>, tiltStrength = 3.2) {
   const element = event.currentTarget;
   const rect = element.getBoundingClientRect();
   const x = (event.clientX - rect.left) / rect.width;
   const y = (event.clientY - rect.top) / rect.height;
   element.style.setProperty("--pointer-x", `${x * 100}%`);
   element.style.setProperty("--pointer-y", `${y * 100}%`);
-  element.style.setProperty("--tilt-x", `${(0.5 - y) * 3.2}deg`);
-  element.style.setProperty("--tilt-y", `${(x - 0.5) * 3.2}deg`);
+  element.style.setProperty("--tilt-x", `${(0.5 - y) * tiltStrength}deg`);
+  element.style.setProperty("--tilt-y", `${(x - 0.5) * tiltStrength}deg`);
 }
 
 function resetPointer(event: MouseEvent<HTMLElement>) {
@@ -196,8 +190,8 @@ function UpdateBadge({ status }: { status: UpdateStatus }) {
   </span>;
 }
 
-const CURRENT_CHANGELOG = "大幅降低cpu、gpu占用率";
-const CURRENT_RELEASE_DATE = "2026-10-24";
+const CURRENT_CHANGELOG = "重构codex雷达页面，现在模型智商更直观";
+const CURRENT_RELEASE_DATE = "2026-10-25";
 
 function UpdatePanel({ status, onRefresh, refreshing }: { status: UpdateStatus; onRefresh: () => void; refreshing: boolean }) {
   const available = status.state === "available";
@@ -395,17 +389,26 @@ function DetailView() {
 
 function RadarView({ radar }: { radar: RadarSnapshot }) {
   const [refreshing, setRefreshing] = useState(false);
+  const groups = useMemo(() => groupRadarModels(radar.models), [radar.models]);
   const refresh = async () => { setRefreshing(true); try { await invoke("refresh_radar"); } finally { setRefreshing(false); } };
   return <div className="radar-panel">
-    <section className="soft-card radar-heading interactive-surface" data-reveal onMouseMove={trackPointer} onMouseLeave={resetPointer}><div><span className={`radar-live ${radar.status ?? ""}`} /><div><strong>模型能力雷达</strong><small>{radar.batch ?? "等待数据"} · Public</small></div></div>
+    <section className="soft-card radar-heading interactive-surface" data-reveal onMouseMove={trackPointer} onMouseLeave={resetPointer}><div><span className={`radar-live ${radar.cached ? "warning" : ""}`} /><div><strong>降智雷达</strong><small>综合分 · 满分 {radar.scoreMax ?? 150}{groups.length ? ` · ${groups.length} 个模型` : " · 等待数据"}</small></div></div>
       <button className="soft-icon-button" title="刷新 Radar" onClick={refresh}><RefreshCw size={15} className={refreshing ? "spin" : ""} /></button></section>
     {radar.error && <div className="soft-alert"><AlertCircle size={14} />{radar.error}{radar.cached ? "（显示缓存）" : ""}</div>}
-    <div className="radar-model-grid">{radar.models.length ? radar.models.map((model) => <article className="soft-card radar-model interactive-surface" data-reveal key={model.id} style={{ "--radar-color": radarColor(model.score) } as CSSProperties} onMouseMove={trackPointer} onMouseLeave={resetPointer}>
-      <strong className="radar-model-name">{model.label}</strong>
-      <div className="radar-iq"><small>IQ 分数</small><strong>{formatRadarScore(model.score)}</strong></div>
-      <div className="radar-community"><span>社区体感</span><strong>{formatRadarScore(model.communityScore)}</strong></div>
-      <div className="radar-reference"><span><small>参考价格</small><strong>{formatRadarCost(model.costUsd)}</strong></span><span><small>参考时间</small><strong>{model.wallTime ?? "--"}</strong></span></div>
-    </article>) : <div className="radar-empty">暂无模型评分，点击刷新重试</div>}</div>
+    <div className="radar-family-list">{groups.length ? groups.map((group) => <section className="radar-family-reveal" data-reveal key={group.id} aria-label={group.label}>
+      <div className="soft-card radar-family interactive-surface" onMouseMove={(event) => trackPointer(event, 1.1)} onMouseLeave={resetPointer}>
+      <header className="radar-family-heading"><h3>{group.label}</h3><span>{group.efforts.length} 个档位</span></header>
+      <div className="radar-effort-grid">{group.efforts.map((model) => <article className="radar-effort-card interactive-surface" key={model.id} data-effort={model.effort}
+        style={{ "--radar-color": radarColor(model.score) } as CSSProperties} onMouseMove={trackPointer} onMouseLeave={resetPointer}
+        aria-label={`${group.label} ${model.effort.toUpperCase()}`}>
+        <h4 className="radar-effort-name">{model.effort.toUpperCase()}</h4>
+        <div className="radar-composite"><small>{radarScoreLabel(model)}</small><div><strong>{formatRadarScore(model.score)}</strong><span>/ {model.scoreMax}</span></div></div>
+        <div className="radar-community"><span>社区体感</span><strong>{formatRadarScore(model.communityScore)}</strong></div>
+        <div className="radar-reference"><span title={radarCostTitle(model)}><small>{model.costKnown > 0 && model.costKnown < model.costTotal ? "费用小计" : "本轮费用"}</small><strong>{["estimated", "mixed"].includes(model.costKind) && model.costUsd != null ? "≈" : ""}{formatRadarCost(model.costUsd)}</strong></span>
+          <span title="每项平均用时，含动画生成、不含自动评分"><small>平均用时</small><strong>{model.wallTime ?? "--"}</strong></span></div>
+      </article>)}</div>
+      </div>
+    </section>) : <div className="radar-empty">暂无综合分数据，点击刷新重试</div>}</div>
     <footer className="radar-footer" data-reveal><span>{radar.attribution}</span><span>{radar.updatedAt ? new Date(radar.updatedAt).toLocaleString("zh-CN") : "尚未更新"}</span></footer>
   </div>;
 }
