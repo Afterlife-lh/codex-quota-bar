@@ -1,21 +1,18 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-const PUBLIC_RADAR_URL: &str = "https://codexradar.com/current.json";
+const PUBLIC_ROUND_URL: &str = "https://codexradar.com/degradation-codex-latest.json";
 const PUBLIC_RATINGS_URL: &str = "https://codexradar.com/api/model-ratings";
-const PUBLIC_METRICS_URL: &str = "https://codexradar.com/api/intelligence-efficiency-metrics";
 
 #[derive(Debug, Clone, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct RadarSnapshot {
     pub models: Vec<RadarModel>,
-    pub quota_rows: Vec<RadarQuotaRow>,
+    pub score_max: Option<f64>,
     pub status: Option<String>,
-    pub signal: Option<String>,
     pub batch: Option<String>,
-    pub quota_batch: Option<String>,
     pub updated_at: Option<String>,
     pub fetched_at: Option<i64>,
     pub source: String,
@@ -29,25 +26,21 @@ pub struct RadarSnapshot {
 #[serde(rename_all = "camelCase")]
 pub struct RadarModel {
     pub id: String,
-    pub label: String,
+    pub model: String,
+    pub model_label: String,
+    pub effort: String,
     pub score: Option<f64>,
-    pub status: Option<String>,
-    pub passed: Option<i64>,
-    pub valid_tasks: Option<i64>,
-    pub invalid_tasks: Option<i64>,
+    pub score_max: f64,
+    pub status: String,
+    pub items_scored: u64,
+    pub items_expected: u64,
     pub wall_time: Option<String>,
     pub cost_usd: Option<f64>,
+    pub cost_kind: String,
+    pub cost_known: usize,
+    pub cost_total: usize,
     pub community_score: Option<f64>,
     pub community_votes: Option<i64>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RadarQuotaRow {
-    pub tier: String,
-    pub five_hour: Option<f64>,
-    pub seven_day: Option<f64>,
-    pub basis: Option<String>,
 }
 
 pub struct RadarService;
@@ -58,28 +51,17 @@ impl RadarService {
     }
 
     pub async fn refresh(&self, previous: &RadarSnapshot) -> RadarSnapshot {
-        let summary = self.fetch_json(PUBLIC_RADAR_URL);
-        let metrics = self.fetch_json(PUBLIC_METRICS_URL);
-        let ratings = self.fetch_json(PUBLIC_RATINGS_URL);
-        let (result, metrics, ratings) = tokio::join!(summary, metrics, ratings);
-        match result {
-            Ok(value) => match parse_summary(&value, now_millis()) {
-                Ok(mut snapshot) => {
-                    if let Ok(value) = metrics {
-                        if let Ok((models, updated_at)) = parse_metrics(&value) {
-                            if !models.is_empty() {
-                                snapshot.models = models;
-                                snapshot.batch = updated_at;
-                            }
-                        }
-                    }
-                    if let Ok(value) = ratings {
-                        apply_ratings(&mut snapshot, &value);
-                    }
-                    snapshot
+        let (round, ratings) = tokio::join!(
+            self.fetch_json(PUBLIC_ROUND_URL),
+            self.fetch_json(PUBLIC_RATINGS_URL)
+        );
+        match round.and_then(|value| parse_round(&value, now_millis())) {
+            Ok(mut snapshot) => {
+                if let Ok(value) = ratings {
+                    apply_ratings(&mut snapshot, &value);
                 }
-                Err(error) => merge_failure(previous, format!("Radar 数据格式错误：{error}")),
-            },
+                snapshot
+            }
             Err(error) => merge_failure(previous, error),
         }
     }
@@ -88,7 +70,10 @@ impl RadarService {
         crate::network::client(Duration::from_secs(12))?
             .get(url)
             .header("Accept", "application/json")
-            .header("User-Agent", "codex-quota-bar/0.8")
+            .header(
+                "User-Agent",
+                concat!("codex-quota-bar/", env!("CARGO_PKG_VERSION")),
+            )
             .header("Cache-Control", "no-cache")
             .send()
             .await
@@ -96,136 +81,218 @@ impl RadarService {
             .map_err(|error| safe_error(&error))?
             .json::<Value>()
             .await
-            .map_err(|error| format!("Radar 响应无法解析：{error}"))
+            .map_err(|_| "Codex Radar 响应无法解析".to_string())
     }
 }
 
-fn parse_model(id: String, label: String, value: &Value) -> RadarModel {
-    RadarModel {
-        id,
-        label,
-        score: value.get("score").and_then(Value::as_f64),
-        status: text(value, "status"),
-        passed: value.get("passed").and_then(Value::as_i64),
-        valid_tasks: value
-            .get("valid_tasks")
-            .or_else(|| value.get("tasks"))
-            .and_then(Value::as_i64),
-        invalid_tasks: value
-            .get("invalid_tasks")
-            .or_else(|| value.get("invalid"))
-            .and_then(Value::as_i64),
-        // current.json exposes both aggregate batch totals and per-task averages.
-        // Cards represent the cost and duration of one representative task, so
-        // prefer the average fields while retaining compatibility with old data.
-        wall_time: text(value, "average_task_time_human")
-            .or_else(|| text(value, "wall_time_human")),
-        cost_usd: value
-            .get("average_cost_usd")
-            .and_then(Value::as_f64)
-            .or_else(|| value.get("cost_usd").and_then(Value::as_f64)),
-        community_score: None,
-        community_votes: None,
+fn parse_round(root: &Value, fetched_at: i64) -> Result<RadarSnapshot, String> {
+    if root.get("schema").and_then(Value::as_str) != Some("degradation-codex-plan/3") {
+        return Err("Codex Radar 综合分快照版本暂不兼容".into());
     }
-}
-
-fn model_id(value: &Value) -> Option<String> {
-    let model = text(value, "model")?.to_ascii_lowercase();
-    let effort = text(value, "reasoning_effort")?.to_ascii_lowercase();
-    Some(format!("{model}-{effort}"))
-}
-
-fn model_sort_key(model: &RadarModel) -> (u8, u8, String) {
-    let id = model.id.to_ascii_lowercase();
-    let family = if id.contains("-sol-") {
-        0
-    } else if id.contains("-terra-") {
-        1
-    } else if id.contains("-luna-") {
-        2
-    } else if id.starts_with("gpt-5.5-") {
-        3
-    } else if id.starts_with("deepseek-v4-") {
-        4
-    } else if id.starts_with("grok-4.5-") {
-        5
-    } else {
-        6
-    };
-    let effort = if id.ends_with("-ultra") {
-        0
-    } else if id.ends_with("-max") {
-        1
-    } else if id.ends_with("-xhigh") {
-        2
-    } else if id.ends_with("-high") {
-        3
-    } else if id.ends_with("-medium") {
-        4
-    } else if id.ends_with("-low") {
-        5
-    } else {
-        6
-    };
-    (family, effort, id)
-}
-
-fn parse_metrics(root: &Value) -> Result<(Vec<RadarModel>, Option<String>), String> {
-    let points = root
-        .get("points")
+    let settings = root
+        .get("settings")
         .and_then(Value::as_array)
-        .ok_or_else(|| "缺少 intelligence efficiency points".to_string())?;
-    let mut models = points
-        .iter()
-        .filter_map(|point| {
-            let model = text(point, "model")?;
-            let effort = text(point, "effort")?;
-            let id = format!(
-                "{}-{}",
-                model.to_ascii_lowercase(),
-                effort.to_ascii_lowercase()
-            );
-            let family = match model.as_str() {
-                "gpt-5.6-sol" => "GPT-5.6 Sol".to_string(),
-                "gpt-5.6-terra" => "GPT-5.6 Terra".to_string(),
-                "gpt-5.6-luna" => "GPT-5.6 Luna".to_string(),
-                "gpt-5.5" => "GPT-5.5".to_string(),
-                "deepseek-v4-flash" => "DeepSeek V4 Flash".to_string(),
-                "deepseek-v4-pro" => "DeepSeek V4 Pro".to_string(),
-                "grok-4.5" => "Grok 4.5".to_string(),
-                _ => model.clone(),
-            };
-            let minutes = point.get("average_minutes").and_then(Value::as_f64);
-            Some(RadarModel {
-                id,
-                label: format!("{family} {effort}"),
-                score: point.get("iq").and_then(Value::as_f64),
-                status: None,
-                passed: point
-                    .get("weighted_passed")
-                    .and_then(Value::as_f64)
-                    .map(|value| value.round() as i64),
-                valid_tasks: point
-                    .get("weighted_total")
-                    .and_then(Value::as_f64)
-                    .map(|value| value.round() as i64),
-                invalid_tasks: None,
-                wall_time: minutes.map(|value| {
-                    if (value - value.round()).abs() < 0.05 {
-                        format!("{value:.0}分钟")
-                    } else {
-                        format!("{value:.1}分钟")
-                    }
-                }),
-                cost_usd: point.get("average_price_usd").and_then(Value::as_f64),
-                community_score: None,
-                community_votes: None,
-            })
-        })
-        .collect::<Vec<_>>();
-    models.sort_by_key(model_sort_key);
-    models.dedup_by(|left, right| left.id.eq_ignore_ascii_case(&right.id));
-    Ok((models, text(root, "source_updated_at")))
+        .ok_or_else(|| "Codex Radar 缺少模型档位列表".to_string())?;
+    let round = root
+        .get("round")
+        .filter(|value| value.is_object())
+        .ok_or_else(|| "Codex Radar 缺少本轮成绩".to_string())?;
+    if root.pointer("/taskset/harness").and_then(Value::as_str) != Some("codex")
+        || root.pointer("/taskset/version").and_then(Value::as_str)
+            != round.get("taskset_version").and_then(Value::as_str)
+    {
+        return Err("Codex Radar 测试题组与本轮成绩不匹配".into());
+    }
+    let score_max = finite(root.pointer("/scoring_policy/total_max"))
+        .filter(|v| *v > 0.0)
+        .unwrap_or(150.0);
+    let items_expected = root
+        .pointer("/scoring_policy/question_count")
+        .and_then(Value::as_u64)
+        .filter(|count| *count > 0)
+        .unwrap_or(10);
+    let tasks = root
+        .get("tasks")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "Codex Radar 缺少测试项目".to_string())?;
+    let mut seen = HashSet::new();
+    let mut models = Vec::new();
+    // This published array also determines the website's model order.
+    // Keep it intact; the frontend groups models and orders their efforts.
+    for setting in settings {
+        let (Some(model), Some(effort)) = (text(setting, "model"), text(setting, "effort")) else {
+            continue;
+        };
+        let model = model.to_ascii_lowercase();
+        let effort = effort.to_ascii_lowercase();
+        let key = format!("{model}|{effort}");
+        if !seen.insert(key.clone()) {
+            continue;
+        }
+        if setting
+            .pointer("/availability/reason")
+            .and_then(Value::as_str)
+            == Some("unsupported_effort")
+        {
+            continue;
+        }
+        let availability = setting
+            .pointer("/availability/status")
+            .and_then(Value::as_str)
+            .unwrap_or("pending");
+        let totals = round.get("totals").and_then(|value| value.get(&key));
+        let items_scored = totals
+            .and_then(|value| value.get("items_scored"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let complete = totals.is_some_and(|value| {
+            value.get("complete").and_then(Value::as_bool) == Some(true)
+                && value.get("items_expected").and_then(Value::as_u64) == Some(items_expected)
+                && items_scored == items_expected
+                && finite(value.get("score_max")) == Some(score_max)
+        });
+        // Only use the published ten-item total, never the legacy IQ or a
+        // partially scored group. Missing results are not zero scores.
+        let score = if availability == "available" && complete {
+            totals
+                .and_then(|value| finite(value.get("score_150")))
+                .filter(|value| (0.0..=score_max).contains(value))
+        } else {
+            None
+        };
+        let results = round.get("results").and_then(|value| value.get(&key));
+        let animation = round.get("animations").and_then(|value| value.get(&key));
+        let mut seconds = Vec::new();
+        let mut costs = Vec::new();
+        for task in tasks {
+            let result = task
+                .get("id")
+                .and_then(Value::as_str)
+                .and_then(|id| results.and_then(|value| value.get(id)));
+            if result.is_some_and(|value| {
+                value.get("status").and_then(Value::as_str) == Some("scored")
+                    && finite(value.get("reward"))
+                        .is_some_and(|reward| (0.0..=1.0).contains(&reward))
+            }) {
+                if let Some(value) = result
+                    .and_then(|value| finite(value.get("seconds")))
+                    .filter(|v| *v >= 0.0)
+                {
+                    seconds.push(value);
+                }
+            }
+            costs.push(result.and_then(|value| value.get("cost")));
+        }
+        // The scoreboard includes animation generation, not its separate judge.
+        if animation
+            .is_some_and(|value| value.get("status").and_then(Value::as_str) == Some("available"))
+        {
+            if let Some(value) = animation
+                .and_then(|value| finite(value.get("seconds")))
+                .filter(|v| *v >= 0.0)
+            {
+                seconds.push(value);
+            }
+        }
+        costs.push(animation.and_then(|value| value.get("cost")));
+        let (cost_usd, cost_kind, cost_known) = summarize_costs(&costs);
+        models.push(RadarModel {
+            id: format!("{model}-{effort}"),
+            model_label: friendly_model_name(&model),
+            model,
+            effort,
+            score,
+            score_max,
+            status: match availability {
+                "unavailable" => "unavailable",
+                "available" if score.is_some() => "scored",
+                "available" if items_scored > 0 => "incomplete",
+                "available" => "not_started",
+                _ => "pending",
+            }
+            .into(),
+            items_scored,
+            items_expected,
+            wall_time: (!seconds.is_empty()).then(|| {
+                format!(
+                    "{:.1}分钟",
+                    seconds.iter().sum::<f64>() / seconds.len() as f64 / 60.0
+                )
+            }),
+            cost_usd,
+            cost_kind,
+            cost_known,
+            cost_total: costs.len(),
+            community_score: None,
+            community_votes: None,
+        });
+    }
+    if models.is_empty() {
+        return Err("Codex Radar 暂无可显示的模型档位".into());
+    }
+    Ok(RadarSnapshot {
+        models,
+        score_max: Some(score_max),
+        status: text(round, "status"),
+        batch: text(round, "id"),
+        updated_at: text(round, "updated_at"),
+        fetched_at: Some(fetched_at),
+        source: "degradation_codex".into(),
+        attribution: "数据来自 Codex 雷达 codexradar.com".into(),
+        site_url: "https://codexradar.com/#stationmaster-round".into(),
+        cached: false,
+        error: None,
+    })
+}
+
+fn summarize_costs(costs: &[Option<&Value>]) -> (Option<f64>, String, usize) {
+    let mut sum = 0.0;
+    let mut known = 0;
+    let mut kinds = HashSet::new();
+    for cost in costs.iter().flatten() {
+        let kind = cost
+            .get("kind")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+        if !["actual", "estimated"].contains(&kind)
+            || cost.get("includes_subagents").and_then(Value::as_bool) != Some(true)
+        {
+            continue;
+        }
+        if let Some(value) = finite(cost.get("usd")).filter(|v| *v >= 0.0) {
+            sum += value;
+            known += 1;
+            kinds.insert(kind);
+        }
+    }
+    let kind = if kinds.len() > 1 {
+        "mixed"
+    } else {
+        kinds.into_iter().next().unwrap_or("unknown")
+    };
+    ((known > 0).then_some(sum), kind.into(), known)
+}
+
+fn friendly_model_name(model: &str) -> String {
+    let mut parts = model.split('-');
+    let first = parts.next().unwrap_or(model);
+    let mut label = match first {
+        "gpt" => format!("GPT-{}", parts.next().unwrap_or_default()),
+        "deepseek" => "DeepSeek".into(),
+        other => title_word(other),
+    };
+    for part in parts {
+        label.push(' ');
+        label.push_str(&title_word(part));
+    }
+    label
+}
+fn title_word(word: &str) -> String {
+    let mut chars = word.chars();
+    chars
+        .next()
+        .map(|first| first.to_uppercase().to_string() + chars.as_str())
+        .unwrap_or_default()
 }
 
 #[derive(Debug, Deserialize)]
@@ -234,7 +301,6 @@ struct RatingModel {
     average: Option<f64>,
     count: Option<i64>,
 }
-
 fn apply_ratings(snapshot: &mut RadarSnapshot, root: &Value) {
     let ratings: HashMap<String, RatingModel> = root
         .get("models")
@@ -245,90 +311,17 @@ fn apply_ratings(snapshot: &mut RadarSnapshot, root: &Value) {
         .map(|rating| (rating.id.to_ascii_lowercase(), rating))
         .collect();
     for model in &mut snapshot.models {
-        if let Some(rating) = ratings.get(&model.id.to_ascii_lowercase()) {
-            model.community_score = rating.average;
+        if let Some(rating) = ratings.get(&model.id) {
+            model.community_score = rating
+                .average
+                .filter(|v| v.is_finite() && (0.0..=10.0).contains(v));
             model.community_votes = rating.count;
         }
     }
 }
-
-fn parse_summary(root: &Value, fetched_at: i64) -> Result<RadarSnapshot, String> {
-    let model_iq = root
-        .get("model_iq")
-        .and_then(Value::as_object)
-        .ok_or_else(|| "缺少 model_iq".to_string())?;
-    let mut models = Vec::new();
-    if let Some(latest) = model_iq.get("latest") {
-        let model = text(latest, "model").unwrap_or_else(|| "Latest".into());
-        let effort = text(latest, "reasoning_effort").unwrap_or_default();
-        let label = format!("{} {}", model, effort).trim().to_string();
-        let id = model_id(latest).unwrap_or_else(|| "latest".into());
-        models.push(parse_model(id, label, latest));
-    }
-    if let Some(comparisons) = model_iq.get("comparisons").and_then(Value::as_object) {
-        let mut entries = comparisons.iter().collect::<Vec<_>>();
-        entries.sort_by_key(|(key, _)| *key);
-        for (key, comparison) in entries {
-            let Some(latest) = comparison.get("latest") else {
-                continue;
-            };
-            let label = text(comparison, "label").unwrap_or_else(|| key.replace('_', " "));
-            let id = model_id(latest)
-                .or_else(|| model_id(comparison))
-                .unwrap_or_else(|| key.replace('_', "-"));
-            models.push(parse_model(id, label, latest));
-        }
-    }
-    models.sort_by_key(model_sort_key);
-    models.dedup_by(|left, right| left.id.eq_ignore_ascii_case(&right.id));
-
-    let quota = model_iq.get("quota_radar");
-    let quota_rows = quota
-        .and_then(|value| value.get("rows"))
-        .and_then(Value::as_array)
-        .map(|rows| {
-            rows.iter()
-                .filter_map(|row| {
-                    Some(RadarQuotaRow {
-                        tier: text(row, "tier")?,
-                        five_hour: row.get("five_h").and_then(Value::as_f64),
-                        seven_day: row.get("seven_d").and_then(Value::as_f64),
-                        basis: text(row, "basis"),
-                    })
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-    let requirements = root.pointer("/api_access/requirements");
-    Ok(RadarSnapshot {
-        models,
-        quota_rows,
-        status: text(root, "status"),
-        signal: root
-            .pointer("/prediction/expected_window")
-            .and_then(Value::as_str)
-            .or_else(|| root.pointer("/window/message").and_then(Value::as_str))
-            .or_else(|| root.pointer("/prediction/summary").and_then(Value::as_str))
-            .map(str::to_string),
-        batch: model_iq.get("latest").and_then(|v| text(v, "date")),
-        quota_batch: quota.and_then(|v| text(v, "date")),
-        updated_at: quota
-            .and_then(|v| text(v, "updated_at"))
-            .or_else(|| text(root, "monitored_at")),
-        fetched_at: Some(fetched_at),
-        source: "public_summary".into(),
-        attribution: requirements
-            .and_then(|v| text(v, "attribution_text"))
-            .unwrap_or_else(|| "数据来自 Codex 雷达 codexradar.com".into()),
-        site_url: requirements
-            .and_then(|v| text(v, "site"))
-            .filter(|url| url == "https://codexradar.com")
-            .unwrap_or_else(|| "https://codexradar.com".into()),
-        cached: false,
-        error: None,
-    })
+fn finite(value: Option<&Value>) -> Option<f64> {
+    value.and_then(Value::as_f64).filter(|v| v.is_finite())
 }
-
 fn text(value: &Value, key: &str) -> Option<String> {
     value
         .get(key)?
@@ -337,22 +330,19 @@ fn text(value: &Value, key: &str) -> Option<String> {
         .filter(|s| !s.is_empty())
         .map(str::to_string)
 }
-
 fn merge_failure(previous: &RadarSnapshot, error: String) -> RadarSnapshot {
     let mut snapshot = previous.clone();
-    snapshot.cached = !snapshot.models.is_empty() || !snapshot.quota_rows.is_empty();
+    snapshot.cached = !snapshot.models.is_empty();
     snapshot.error = Some(error);
     snapshot
 }
-
 fn safe_error(error: &reqwest::Error) -> String {
     if error.is_timeout() {
         "Codex Radar 请求超时".into()
     } else {
-        "无法连接 Codex Radar".into()
+        "无法读取 Codex Radar 综合分".into()
     }
 }
-
 fn now_millis() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -363,87 +353,130 @@ fn now_millis() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
+    fn fixture() -> Value {
+        json!({
+            "schema":"degradation-codex-plan/3", "taskset":{"harness":"codex","version":"round-v3"},
+            "scoring_policy":{"question_count":10,"total_max":150},
+            "settings":[
+                {"model":"gpt-6-astra","effort":"ultra","availability":{"status":"available"}},
+                {"model":"gpt-6.1-sol","effort":"max","availability":{"status":"available"}},
+                {"model":"gpt-6-luna","effort":"max","availability":{"status":"available"}}
+            ], "tasks":[{"id":"a"},{"id":"b"}],
+            "round":{"id":"test-round","taskset_version":"round-v3","status":"running","updated_at":"2026-10-25T09:00:00+08:00",
+                "totals":{"gpt-6-astra|ultra":{"complete":true,"items_scored":10,"items_expected":10,"score_max":150,"score_150":148.0285714285714},
+                    "gpt-6.1-sol|max":{"complete":false,"items_scored":9,"items_expected":10,"score_max":150,"score_150":null}},
+                "results":{"gpt-6-astra|ultra":{
+                    "a":{"status":"scored","reward":1,"seconds":60,"cost":{"usd":2,"kind":"estimated","includes_subagents":true}},
+                    "b":{"status":"scored","reward":0.8,"seconds":120,"cost":{"usd":3,"kind":"actual","includes_subagents":true}}
+                }},
+                "animations":{"gpt-6-astra|ultra":{"status":"available","seconds":180,"cost":{"usd":4,"kind":"estimated","includes_subagents":true},
+                    "judge":{"seconds":9999,"cost":{"usd":999,"kind":"estimated","includes_subagents":true}}}}
+            }
+        })
+    }
     #[test]
-    fn parses_dynamic_models_and_quota_rows() {
-        let value: Value = serde_json::from_str(r#"{
-          "status":"community_confirmed","window":{"message":"等待下一轮"},
-          "api_access":{"requirements":{"attribution_text":"数据来自 Codex 雷达 codexradar.com","site":"https://codexradar.com"}},
-          "model_iq":{"latest":{"date":"2026-07-20","model":"gpt-5.6-sol","reasoning_effort":"max","score":135,"passed":9,"valid_tasks":10,"cost_usd":1053.478825,"wall_time_human":"69小时4分","average_cost_usd":9.406061,"average_task_seconds":2220.116,"average_task_time_human":"37分钟"},
-          "comparisons":{"future_model":{"label":"Future high","latest":{"score":105,"passed":7,"tasks":10}}},
-          "quota_radar":{"date":"2026-07-11-pm","rows":[{"tier":"20x Pro","five_h":328.15,"seven_d":1968.9,"basis":"measured"}]}}
-        }"#).unwrap();
-        let snapshot = parse_summary(&value, 42).unwrap();
-        assert_eq!(snapshot.models.len(), 2);
-        assert_eq!(snapshot.models[0].cost_usd, Some(9.406061));
-        assert_eq!(snapshot.models[0].wall_time.as_deref(), Some("37分钟"));
-        assert_eq!(snapshot.models[1].label, "Future high");
-        assert_eq!(snapshot.quota_rows[0].five_hour, Some(328.15));
+    fn uses_published_composite_score_and_keeps_site_family_order() {
+        let snapshot = parse_round(&fixture(), 42).unwrap();
+        assert_eq!(
+            snapshot
+                .models
+                .iter()
+                .map(|model| model.model.as_str())
+                .collect::<Vec<_>>(),
+            ["gpt-6-astra", "gpt-6.1-sol", "gpt-6-luna"]
+        );
+        assert_eq!(snapshot.models[0].model_label, "GPT-6 Astra");
+        assert_eq!(snapshot.models[0].score, Some(148.0285714285714));
+        assert_eq!(snapshot.models[1].score, None);
+        assert_eq!(snapshot.models[2].score, None);
         assert_eq!(snapshot.fetched_at, Some(42));
     }
-
     #[test]
-    fn joins_community_scores_by_stable_model_identity() {
-        let mut snapshot = RadarSnapshot {
-            models: vec![parse_model(
-                "gpt-5.6-sol-max".into(),
-                "GPT-5.6 Sol max".into(),
-                &serde_json::json!({"score": 135}),
-            )],
-            ..RadarSnapshot::default()
-        };
+    fn matches_round_cost_and_average_time_without_the_separate_judge() {
+        let model = parse_round(&fixture(), 42).unwrap().models.remove(0);
+        assert_eq!(model.cost_usd, Some(9.0));
+        assert_eq!(model.cost_kind, "mixed");
+        assert_eq!(model.cost_known, 3);
+        assert_eq!(model.wall_time.as_deref(), Some("2.0分钟"));
+    }
+    #[test]
+    fn never_turns_partial_scores_or_unknown_costs_into_zero() {
+        let mut value = fixture();
+        value["round"]["totals"]["gpt-6.1-sol|max"]["score_150"] = json!(120);
+        let models = parse_round(&value, 42).unwrap().models;
+        assert_eq!(models[1].score, None);
+        assert_eq!(models[1].status, "incomplete");
+        assert_eq!(models[2].cost_usd, None);
+        assert_eq!(models[2].wall_time, None);
+    }
+    #[test]
+    fn preserves_a_legitimate_zero_score() {
+        let mut value = fixture();
+        value["round"]["totals"]["gpt-6-astra|ultra"]["score_150"] = json!(0);
+        assert_eq!(parse_round(&value, 42).unwrap().models[0].score, Some(0.0));
+    }
+    #[test]
+    fn supports_new_models_and_omits_explicitly_unsupported_efforts() {
+        let mut value = fixture();
+        value["settings"] = json!([
+            {"model":"gpt-7.2-future","effort":"new-mode","availability":{"status":"pending"}},
+            {"model":"gpt-6-luna","effort":"ultra","availability":{"status":"unavailable","reason":"unsupported_effort"}},
+            {"model":"gpt-6-luna","effort":"max","availability":{"status":"unavailable","reason":"service_unavailable"}}
+        ]);
+        let models = parse_round(&value, 42).unwrap().models;
+        assert_eq!(models.len(), 2);
+        assert_eq!(models[0].model_label, "GPT-7.2 Future");
+        assert_eq!(models[0].effort, "new-mode");
+        assert_eq!(models[1].effort, "max");
+        assert_eq!(models[1].status, "unavailable");
+    }
+    #[test]
+    fn joins_community_ratings_by_exact_model_and_effort() {
+        let mut snapshot = parse_round(&fixture(), 42).unwrap();
         apply_ratings(
             &mut snapshot,
-            &serde_json::json!({"models":[{"id":"gpt-5.6-sol-max","average":8.5,"count":115}]}),
+            &json!({"models":[{"id":"gpt-6-astra-ultra","average":8.5,"count":115}]}),
         );
         assert_eq!(snapshot.models[0].community_score, Some(8.5));
-        assert_eq!(snapshot.models[0].community_votes, Some(115));
+        assert_eq!(snapshot.models[1].community_score, None);
     }
-
     #[test]
-    fn parses_complete_metrics_families_and_reference_values() {
-        let value = serde_json::json!({
-            "source_updated_at": "2026-08-09T08:00:00Z",
-            "points": [
-                {"model":"deepseek-v4-flash","effort":"max","iq":101.5,"average_price_usd":1.2,"average_minutes":12.4,"weighted_passed":8.1,"weighted_total":10.0},
-                {"model":"gpt-5.5","effort":"xhigh","iq":118.0,"average_price_usd":4.5,"average_minutes":28.0,"weighted_passed":9.0,"weighted_total":10.0},
-                {"model":"gpt-5.6-luna","effort":"medium","iq":92.0,"average_price_usd":2.1,"average_minutes":18.0,"weighted_passed":7.0,"weighted_total":10.0},
-                {"model":"gpt-5.6-terra","effort":"low","iq":88.0,"average_price_usd":1.8,"average_minutes":15.0,"weighted_passed":6.0,"weighted_total":10.0},
-                {"model":"gpt-5.6-sol","effort":"ultra","iq":140.0,"average_price_usd":9.4,"average_minutes":37.0,"weighted_passed":9.5,"weighted_total":10.0}
-            ]
-        });
-        let (models, updated_at) = parse_metrics(&value).unwrap();
-        assert_eq!(updated_at.as_deref(), Some("2026-08-09T08:00:00Z"));
-        assert_eq!(models.len(), 5);
-        assert_eq!(models[0].id, "gpt-5.6-sol-ultra");
-        assert_eq!(models[0].cost_usd, Some(9.4));
-        assert_eq!(models[0].wall_time.as_deref(), Some("37分钟"));
-        assert_eq!(models[4].id, "deepseek-v4-flash-max");
+    fn rejects_old_iq_sources_and_keeps_the_last_successful_round() {
+        assert!(parse_round(&json!({"points":[{"iq":140}]}), 42).is_err());
+        let mut value = fixture();
+        value["round"]["taskset_version"] = json!("other-round");
+        assert!(parse_round(&value, 42).is_err());
+        let snapshot = parse_round(&fixture(), 42).unwrap();
+        let cached = merge_failure(&snapshot, "offline".into());
+        assert!(cached.cached);
+        assert_eq!(cached.models[0].score, snapshot.models[0].score);
     }
-
     #[test]
-    fn sorts_known_families_and_efforts_in_site_order() {
-        let mut models = [
-            ("gpt-5.6-luna-medium", "Luna medium"),
-            ("gpt-5.6-sol-low", "Sol low"),
-            ("gpt-5.6-terra-xhigh", "Terra xhigh"),
-            ("gpt-5.6-sol-max", "Sol max"),
-        ]
-        .into_iter()
-        .map(|(id, label)| parse_model(id.into(), label.into(), &serde_json::json!({})))
-        .collect::<Vec<_>>();
-        models.sort_by_key(model_sort_key);
+    #[ignore = "explicit verification against a downloaded public website snapshot"]
+    fn verifies_current_public_snapshot_fixture() {
+        let path = std::env::var("CQB_RADAR_FIXTURE")
+            .expect("set CQB_RADAR_FIXTURE to a downloaded public snapshot");
+        let value: Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        let mut snapshot = parse_round(&value, 42).unwrap();
         assert_eq!(
-            models
-                .iter()
-                .map(|model| model.id.as_str())
-                .collect::<Vec<_>>(),
-            [
-                "gpt-5.6-sol-max",
-                "gpt-5.6-sol-low",
-                "gpt-5.6-terra-xhigh",
-                "gpt-5.6-luna-medium"
-            ]
+            snapshot.models.len(),
+            value["settings"].as_array().unwrap().len()
         );
+        for model in &snapshot.models {
+            let key = format!("{}|{}", model.model, model.effort);
+            assert_eq!(
+                model.score,
+                value["round"]["totals"][key]["score_150"].as_f64()
+            );
+        }
+        if let Ok(path) = std::env::var("CQB_RADAR_RATINGS_FIXTURE") {
+            let ratings: Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+            apply_ratings(&mut snapshot, &ratings);
+        }
+        if let Ok(path) = std::env::var("CQB_RADAR_OUTPUT") {
+            std::fs::write(path, serde_json::to_vec_pretty(&snapshot).unwrap()).unwrap();
+        }
     }
 }
