@@ -42,7 +42,7 @@ afterEach(() => {
 describe("window activity", () => {
   it("stops hidden clocks and catches up immediately on every reopen", async () => {
     const activity = await import("./windowActivity");
-    await activity.initializeWindowActivity();
+    await activity.initializeWindowActivity("detail");
     const ticks = vi.fn(() => Date.now());
     const stop = activity.startActiveInterval(ticks, 1000);
     vi.advanceTimersByTime(5000);
@@ -72,7 +72,7 @@ describe("window activity", () => {
     let resolveInitial!: (visible: boolean) => void;
     bridge.invoke.mockImplementation(() => new Promise<boolean>((resolve) => { resolveInitial = resolve; }));
     const activity = await import("./windowActivity");
-    const initialized = activity.initializeWindowActivity();
+    const initialized = activity.initializeWindowActivity("detail");
     await Promise.resolve();
     bridge.onActivity!({ payload: true });
     resolveInitial(false);
@@ -82,7 +82,7 @@ describe("window activity", () => {
 
   it("keeps native-hidden windows paused through browser visibility changes", async () => {
     const activity = await import("./windowActivity");
-    await activity.initializeWindowActivity();
+    await activity.initializeWindowActivity("detail");
     onVisibilityChange();
     expect(fakeDocument.documentElement.dataset.windowActive).toBe("false");
     bridge.onActivity!({ payload: true });
@@ -99,7 +99,7 @@ describe("window activity", () => {
     const alreadyPaused = { playState: "paused", pause: vi.fn(), play: vi.fn() };
     fakeDocument.getAnimations.mockReturnValue([running, alreadyPaused]);
     const activity = await import("./windowActivity");
-    await activity.initializeWindowActivity();
+    await activity.initializeWindowActivity("detail");
     bridge.onActivity!({ payload: true });
     bridge.onActivity!({ payload: false });
     expect(running.pause).toHaveBeenCalledTimes(1);
@@ -107,5 +107,66 @@ describe("window activity", () => {
     bridge.onActivity!({ payload: true });
     expect(running.play).toHaveBeenCalledTimes(1);
     expect(alreadyPaused.play).not.toHaveBeenCalled();
+  });
+
+  it("keeps a natively visible taskbar running when the page reports hidden", async () => {
+    bridge.invoke.mockResolvedValue(true);
+    fakeDocument.visibilityState = "hidden";
+    const activity = await import("./windowActivity");
+    await activity.initializeWindowActivity("taskbar");
+    const ticks = vi.fn(() => Date.now());
+    const stop = activity.startActiveInterval(ticks, 1000);
+
+    expect(fakeDocument.documentElement.dataset.windowActive).toBe("true");
+    vi.advanceTimersByTime(5000);
+    expect(ticks).toHaveBeenCalledTimes(6);
+    onVisibilityChange();
+    bridge.onActivity!({ payload: true });
+    expect(vi.getTimerCount()).toBe(1);
+    vi.advanceTimersByTime(1000);
+    expect(ticks).toHaveBeenCalledTimes(7);
+    stop();
+  });
+
+  it("still pauses the taskbar when it is actually hidden and catches up on restore", async () => {
+    bridge.invoke.mockResolvedValue(true);
+    fakeDocument.visibilityState = "hidden";
+    const activity = await import("./windowActivity");
+    await activity.initializeWindowActivity("taskbar");
+    const ticks = vi.fn(() => Date.now());
+    const stop = activity.startActiveInterval(ticks, 1000);
+    expect(ticks).toHaveBeenCalledTimes(1);
+
+    bridge.onActivity!({ payload: false });
+    fakeDocument.visibilityState = "visible";
+    onVisibilityChange();
+    vi.advanceTimersByTime(60_000);
+    expect(ticks).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+
+    fakeDocument.visibilityState = "hidden";
+    onVisibilityChange();
+    bridge.onActivity!({ payload: true });
+    expect(ticks).toHaveBeenCalledTimes(2);
+    expect(ticks.mock.results.at(-1)?.value).toBe(Date.now());
+    expect(vi.getTimerCount()).toBe(1);
+    stop();
+  });
+
+  it.each(["detail", "settings", "menu"])("keeps the %s popup paused when hidden", async (label) => {
+    const activity = await import("./windowActivity");
+    await activity.initializeWindowActivity(label);
+    const ticks = vi.fn();
+    const stop = activity.startActiveInterval(ticks, 1000);
+    vi.advanceTimersByTime(60_000);
+    expect(ticks).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+
+    bridge.onActivity!({ payload: true });
+    fakeDocument.visibilityState = "hidden";
+    onVisibilityChange();
+    expect(fakeDocument.documentElement.dataset.windowActive).toBe("false");
+    expect(vi.getTimerCount()).toBe(0);
+    stop();
   });
 });

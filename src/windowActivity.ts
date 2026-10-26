@@ -4,11 +4,15 @@ import { listen } from "@tauri-apps/api/event";
 
 let nativeVisible = false;
 let active = false;
+let nativeVisibilityOnly = false;
 const subscribers = new Set<() => void>();
 const pausedAnimations = new Set<Animation>();
 
 function updateActivity() {
-  const next = nativeVisible && document.visibilityState !== "hidden";
+  // A transparent, non-activating taskbar window can be classified as a hidden
+  // page while its native window is still on screen. Only popups use that extra
+  // browser visibility gate; the resident widget follows its own native window.
+  const next = nativeVisible && (nativeVisibilityOnly || document.visibilityState !== "hidden");
   document.documentElement.dataset.windowActive = String(next);
   if (next === active) return;
   active = next;
@@ -36,7 +40,8 @@ function setNativeVisible(visible: boolean) {
   updateActivity();
 }
 
-export async function initializeWindowActivity() {
+export async function initializeWindowActivity(windowLabel: string) {
+  nativeVisibilityOnly = windowLabel === "taskbar";
   document.documentElement.dataset.windowActive = "false";
   document.addEventListener("visibilitychange", updateActivity);
   let revision = 0;

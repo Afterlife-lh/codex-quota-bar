@@ -626,8 +626,8 @@ pub fn show_widget(app: &AppHandle, settings: &AppSettings) -> Result<(), String
         .get_webview_window("taskbar")
         .ok_or("taskbar window missing")?;
     let hwnd = window.hwnd().map_err(|error| error.to_string())?;
-    crate::window_activity::set_active(&window, true);
     platform::show_widget(hwnd.0);
+    crate::window_activity::sync_taskbar(&window);
     Ok(())
 }
 
@@ -753,11 +753,12 @@ pub fn spawn_reposition_loop(app: AppHandle, state: std::sync::Arc<crate::AppSta
         let mut suppressed = false;
         let mut shown = false;
         let mut last_applied_position: Option<(i32, i32)> = None;
+        let mut last_activity_sync = std::time::Instant::now();
         loop {
             if platform::should_hide_widget() {
                 if !suppressed {
-                    crate::window_activity::set_active(&window, false);
                     platform::hide_widget(hwnd as _);
+                    crate::window_activity::sync_taskbar(&window);
                     for label in ["detail", "menu", "settings"] {
                         if let Some(auxiliary) = app.get_webview_window(label) {
                             let _ = crate::window_activity::hide(&auxiliary);
@@ -820,13 +821,20 @@ pub fn spawn_reposition_loop(app: AppHandle, state: std::sync::Arc<crate::AppSta
                 let animating =
                     settings.animations && progress < 1.0 && animation_from != (target.x, target.y);
                 if !shown {
-                    crate::window_activity::set_active(&window, true);
                     platform::show_widget(hwnd as _);
+                    crate::window_activity::sync_taskbar(&window);
+                    last_activity_sync = now;
                     shown = true;
                 } else if !animating {
                     // A low-frequency Z-order keepalive repairs Explorer taskbar
                     // reordering without returning to the former 60Hz Win32 loop.
                     platform::keep_widget_visible(hwnd as _);
+                }
+                if now.duration_since(last_activity_sync) >= std::time::Duration::from_secs(5) {
+                    // Repair taskbar-only controller/activity drift, even after
+                    // sleep or Explorer reordering, without waking hidden popups.
+                    crate::window_activity::sync_taskbar(&window);
+                    last_activity_sync = now;
                 }
 
                 let interval = if animating {
