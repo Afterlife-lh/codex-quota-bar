@@ -492,7 +492,7 @@ dependencies = [
 
 [[package]]
 name = "codex-quota-bar"
-version = "0.15.5"
+version = "0.15.8"
 dependencies = [
  "chrono",
  "dirs 5.0.1",
@@ -506,6 +506,8 @@ dependencies = [
  "tauri-plugin-single-instance",
  "thiserror 2.0.18",
  "tokio",
+ "webview2-com",
+ "windows-core 0.61.2",
  "windows-sys 0.59.0",
  "winreg 0.55.0",
 ]

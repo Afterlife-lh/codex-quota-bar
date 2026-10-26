@@ -54,6 +54,10 @@ Installing a newer MSI upgrades an existing installation.
 
 ## Changelog
 
+### 0.15.8
+
+- Fixed taskbar quota values not refreshing and slightly reduced the app's memory usage.
+
 ### 0.15.5
 
 - Redesigned the Codex Radar page to make model intelligence scores more intuitive.

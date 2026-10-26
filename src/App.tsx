@@ -11,6 +11,7 @@ import type { AppSettings, QuotaSnapshot, QuotaWindow } from "./types";
 import { EMPTY_SNAPSHOT, normalizeSettings } from "./types";
 import { findWindow, formatCountdown, formatRadarCost, formatRadarScore, quotaColor, radarColor, ringGeometry, statusText } from "./visual";
 import { startActiveInterval, useWindowActive } from "./windowActivity";
+import { subscribeQuota } from "./quotaSubscription";
 import { groupRadarModels, radarCostTitle, radarScoreLabel, type RadarSnapshot } from "./radar";
 
 interface UpdateStatus {
@@ -33,15 +34,33 @@ interface TokenUsageSnapshot {
   projects: Array<{ name: string; path: string; totalTokens: number; conversationCount: number; updatedAt: number }>;
 }
 
-function useQuota() {
+function useQuota(reconcileEveryMinute = false) {
+  const active = useWindowActive();
   const [snapshot, setSnapshot] = useState<QuotaSnapshot>(EMPTY_SNAPSHOT);
   const [now, setNow] = useState(Date.now());
+  const subscription = useRef<ReturnType<typeof subscribeQuota>>();
   useEffect(() => {
-    invoke<QuotaSnapshot>("get_status").then(setSnapshot).catch(() => undefined);
-    const unlisten = listen<QuotaSnapshot>("quota-updated", (event) => setSnapshot(event.payload));
+    const source = subscribeQuota(setSnapshot);
+    subscription.current = source;
+    void source.refresh();
     const stopClock = startActiveInterval(() => setNow(Date.now()), 1000);
-    return () => { stopClock(); void unlisten.then((fn) => fn()); };
-  }, []);
+    // The taskbar can recover from a missed IPC event without opening details.
+    // This reads memory in Rust, not the remote quota endpoint, and stops hidden.
+    const stopReconcile = reconcileEveryMinute
+      ? startActiveInterval(() => { void source.refresh(); }, 60_000)
+      : undefined;
+    return () => {
+      stopClock();
+      stopReconcile?.();
+      source.dispose();
+      subscription.current = undefined;
+    };
+  }, [reconcileEveryMinute]);
+  useEffect(() => {
+    if (!active) return;
+    setNow(Date.now());
+    void subscription.current?.refresh();
+  }, [active]);
   return { snapshot, now };
 }
 
@@ -138,7 +157,7 @@ function QuotaRow({ window, label, now, dark, showCountdown = true }: { window?:
 }
 
 function TaskbarView() {
-  const { snapshot, now } = useQuota();
+  const { snapshot, now } = useQuota(true);
   const update = useUpdateStatus();
   const settings = useSettings();
   const dark = useDarkTheme(settings?.followSystemTheme ?? true);
@@ -190,8 +209,8 @@ function UpdateBadge({ status }: { status: UpdateStatus }) {
   </span>;
 }
 
-const CURRENT_CHANGELOG = "重构codex雷达页面，现在模型智商更直观";
-const CURRENT_RELEASE_DATE = "2026-10-25";
+const CURRENT_CHANGELOG = "修复任务栏额度不刷新的bug，小幅降低软件内存占用";
+const CURRENT_RELEASE_DATE = "2026-10-26";
 
 function UpdatePanel({ status, onRefresh, refreshing }: { status: UpdateStatus; onRefresh: () => void; refreshing: boolean }) {
   const available = status.state === "available";
